@@ -14,6 +14,7 @@ from pathlib import Path
 import json
 import re
 from datetime import datetime
+import time  # Required for time.sleep() calls
 
 # Constants
 APP_NAME = "Richey May RTA Builder"
