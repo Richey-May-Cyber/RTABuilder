@@ -10,6 +10,7 @@ import importlib.util
 import urllib.request
 import zipfile
 import tempfile
+from rta_builder_app import RTABuilderApp
 
 # Application info
 APP_NAME = "Richey May RTA Builder"
