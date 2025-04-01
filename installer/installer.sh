@@ -67,16 +67,13 @@ echo 'chmod +x VMware-Remote-Console*.bundle && sudo ./VMware-Remote-Console*.bu
 echo '2. Extract and run the .run or .jar installer inside the extracted directory.'
 echo '3. Follow GUI setup steps or use silent mode if available.'"
 
-    create_manual_helper "ninjaone" "if command -v wine &>/dev/null; then
-    if [ -f "\$HOME/Downloads/$NINJAONE_MSI" ]; then
-        echo 'Installing NinjaOne agent using Wine...'
-        wine msiexec /i "\$HOME/Downloads/$NINJAONE_MSI" /qn
-        echo 'NinjaOne agent installed.'
-    else
-        echo 'NinjaOne MSI file not found in ~/Downloads. Please move it there and re-run this script.'
-    fi
+    create_manual_helper "ninjaone" "if [ -f \"\$HOME/Downloads/$NINJAONE_DEB\" ]; then
+    echo 'Installing NinjaOne agent from .deb package...'
+    sudo dpkg -i \"\$HOME/Downloads/$NINJAONE_DEB\"
+    sudo apt-get install -f -y
+    echo 'NinjaOne agent installed.'
 else
-    echo 'Wine is not installed. Please install Wine or run the MSI on a Windows host.'
+    echo 'NinjaOne .deb file not found in ~/Downloads. Please move it there and re-run this script.'
 fi"
 }
 
