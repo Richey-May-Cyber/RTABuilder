@@ -1,93 +1,83 @@
-# Richey May RTA Builder
+🧰 RTA Tools Installer
+A fully automated Kali Linux-based security toolkit installer for Remote Testing Appliances (RTAs).
 
-A Windows-native application for creating custom Kali Linux ISO images for Richey May's Red Team Assessment (RTA) devices. This tool allows you to easily select and inject penetration testing tools into a Kali Linux ISO, without requiring WSL or a Linux environment.
+🚀 Features
+🔁 Fully automated setup with retry, validation, and logging
 
-## 🌟 Features
+🛠 Optional CLI flags for core or full tool installation
 
-### Core Functionality
-- **Windows-Native Operation**: Build Kali Linux ISOs directly from Windows without WSL or Linux VMs
-- **Custom Tool Injection**: Select from a list of penetration testing tools to include in your ISO
-- **Modern GUI**: Clean, professional interface with Richey May Cyber branding
-- **Progress Tracking**: Real-time progress updates and detailed logging
-- **Multiple Output Formats**: Create ISO, VHD (Hyper-V), and AMI (AWS) images (VHD/AMI in future updates)
+⚡ Parallel installation to reduce setup time
 
-### Deployment & Image Customization
-- **Custom Output Location**: Choose where to save your customized ISO
-- **Tool Selection Interface**: Clean checkbox interface for selecting tools to include
-- **ISO Repackaging**: Automatic extraction, modification, and repackaging of ISO files
-- **Branding Options**: Add custom Richey May branding to the ISO
+🔐 Desktop integration (shortcuts) and post-install hardening
 
-## 📋 Requirements
+📄 Manual installation helpers generated for tools requiring GUI or special handling (e.g., Nessus, VMware Remote Console, Burp Suite Enterprise, NinjaOne)
 
-- Windows 10/11 (64-bit)
-- Administrator privileges (required for ISO modification)
-- Internet connection (for downloading Kali ISO if needed)
-- Approximately 8GB of free disk space
+📦 Tool Categories
+Type	Source	Examples
+APT	Kali repos	nmap, wireshark, sqlmap, bettercap, hydra
+pipx	PyPi	scoutsuite, impacket, pymeta
+Git	GitHub	prowler, parsuite, evilgophish, kali-anonsurf
+Manual	Local file	nessus, burpsuite_enterprise, teamviewer, ninjaone
+⚙️ CLI Usage
+bash
+Copy
+Edit
+# Clone repo
+git clone https://github.com/Richey-May-Cyber/RTABuilder.git
+cd RTABuilder/installer
 
-## 🚀 Installation
+# Run as root
+sudo ./installer.sh --core-only    # Fast install with just core tools
+sudo ./installer.sh --full         # Full install with GitHub tools, pipx, apt, and helpers
+🧾 Configuration
+The YAML config at /opt/security-tools/config.yml contains the list of tools to install:
 
-### Option 1: Installer (Recommended)
-1. Download the latest installer from the releases page
-2. Run `RicheyMay_RTA_Builder_Setup.exe`
-3. Follow the installation wizard instructions
-4. Launch the application from the Start Menu or Desktop shortcut
+yaml
+Copy
+Edit
+apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,responder,metasploit-framework"
+pipx_tools: "scoutsuite,impacket,pymeta"
+git_tools: "https://github.com/prowler-cloud/prowler.git,https://github.com/ImpostorKeanu/parsuite.git,https://github.com/fin3ss3g0d/evilgophish.git,https://github.com/Und3rf10w/kali-anonsurf.git"
+🪛 Manual Tools
+The script detects and builds helper scripts for tools that cannot be installed automatically:
 
-### Option 2: Portable Version
-1. Download the latest ZIP package from the releases page
-2. Extract the ZIP file to a location of your choice
-3. Run `Richey May RTA Builder.exe` to start the application
+Tool	Notes
+Nessus	Downloads from Tenable and configures local web UI
+VMware Remote Console	Must be downloaded manually and run with .bundle
+Burp Suite Enterprise	Installs from local .run or .jar
+TeamViewer Host	Installs with workaround for deprecated dependency
+NinjaOne	Installs via wine if present, or helper created
+Helpers are saved to:
 
-## 📝 Usage Instructions
+bash
+Copy
+Edit
+/opt/security-tools/helpers/install_<tool>.sh
+Run them as needed:
 
-### Basic Usage
-1. **Select or Download ISO**: Choose an existing Kali ISO or download the latest version
-2. **Choose Output Folder**: Select where you want to save the customized ISO
-3. **Select Tools**: Check the boxes for the tools you want to include
-4. **Build**: Click "Build Custom ISO" to create your customized Kali image
-5. **Monitor Progress**: Watch the build log and progress bar for updates
+bash
+Copy
+Edit
+sudo /opt/security-tools/helpers/install_ninjaone.sh
+📜 Post-Install: Disable Lock Screen
+Optional script provided to ensure RTAs don’t lock during testing:
 
-### Advanced Options
-- **Custom Hostname**: Set a custom hostname for your Kali system
-- **Branding**: Enable/disable Richey May branding
-- **Output Formats**: Select additional output formats (ISO, VHD, AMI)
+bash
+Copy
+Edit
+chmod +x /opt/security-tools/scripts/disable-lock-screen.sh
+sudo /opt/security-tools/scripts/disable-lock-screen.sh
+Script disables screen lock in both GNOME and XFCE, and turns off DPMS.
 
-## 🛠️ For Developers
-
-### Building from Source
-1. Clone the repository
-2. Install required Python packages:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Run the launcher:
-   ```
-   python rta_builder_launcher.py
-   ```
-
-### Creating Distributable Package
-1. Install PyInstaller:
-   ```
-   pip install pyinstaller
-   ```
-2. Run the distribution script:
-   ```
-   python distribution_setup.py
-   ```
-3. Find the executable in the `dist` folder
-
-## 📊 Branding Information
-
-- **Primary Color**: #002B49 (Midnight Blue)
-- **Accent Color**: #6AA339 (Spring Green)
-- **Text Color**: White
-- **Font**: Arial, 12pt
-
-## 🤝 Support
-
-For issues, feature requests, or questions, please contact the Richey May Cyber team.
-
-## 📜 License
-
-This software is proprietary and confidential. Unauthorized copying, distribution, or use is strictly prohibited.
-
-© 2023 Richey May & Co., LLC. All rights reserved.
+📂 File Structure
+bash
+Copy
+Edit
+installer/
+├── installer.sh                      # Main entry point
+├── config.yml                        # List of tools to install
+├── helpers/                          # Manual install scripts
+├── logs/                             # Logs per tool and overall
+└── scripts/disable-lock-screen.sh    # Optional UX hardening
+🧪 Status
+✅ Fully tested on Kali 2024.1
