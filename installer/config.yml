@@ -1,0 +1,3 @@
+apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,responder"
+pipx_tools: "scoutsuite,impacket,pymeta"
+git_tools: "https://github.com/prowler-cloud/prowler.git,https://github.com/ImpostorKeanu/parsuite.git"
