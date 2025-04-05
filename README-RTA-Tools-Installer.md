@@ -1,93 +1,149 @@
+# 🛡️ Improved RTA Tools Installer
 
-# 🧰 RTA Tools Installer
-
-A fully automated Kali Linux-based security toolkit installer for Remote Testing Appliances (RTAs).
+A robust, efficient, and reliable toolkit installer for Kali Linux Remote Testing Appliances (RTAs). This solution streamlines the setup and redeployment process for security testing environments.
 
 ## 🚀 Features
 
-- 🔁 Fully automated setup with retry, validation, and logging
-- 🛠 Optional CLI flags for core or full tool installation
-- ⚡ Parallel installation to reduce setup time
-- 🔐 Desktop integration (shortcuts) and post-install hardening
-- 📄 Manual installation helpers generated for tools requiring GUI or special handling (e.g., Nessus, VMware Remote Console, Burp Suite Enterprise, NinjaOne)
+- **Comprehensive Toolkit**: Installs and configures 75+ security testing tools
+- **Efficient Installation**: Parallel processing for faster deployment
+- **Robust Error Handling**: Improved retry mechanisms and conflict resolution
+- **Desktop Integration**: Creates shortcuts, sets up environment, and disables screen lock
+- **Configuration**: YAML-based configuration for easy customization
+- **Deployment Options**: Full installation, core tools only, or desktop-only mode
+- **Helper Scripts**: Automated generators for tools requiring manual installation
+- **Documentation**: Detailed reports and system snapshots
+
+## 📋 Components
+
+The solution consists of two main scripts:
+
+1. **`rta_installer.sh`**: The main installer script that handles tool installation
+2. **`deploy-rta.sh`**: A deployment wrapper that configures the entire system
+
+## 🛠️ Installation
+
+### Quick Start
+
+```bash
+# Download and run the deployment script
+curl -sSL https://raw.githubusercontent.com/yourusername/rta-installer/main/deploy-rta.sh -o deploy-rta.sh
+chmod +x deploy-rta.sh
+sudo ./deploy-rta.sh
+```
+
+### Installation Options
+
+```bash
+# Full interactive installation
+sudo ./deploy-rta.sh --interactive
+
+# Fully automated installation
+sudo ./deploy-rta.sh --auto
+
+# Direct tool installation only
+sudo ./rta_installer.sh --full       # Install all tools
+sudo ./rta_installer.sh --core-only  # Install core tools only
+sudo ./rta_installer.sh --desktop-only # Set up desktop shortcuts only
+```
 
 ## 📦 Tool Categories
 
-| Type       | Source     | Examples                                                |
-|------------|------------|---------------------------------------------------------|
-| APT        | Kali repos | `nmap`, `wireshark`, `sqlmap`, `bettercap`, `hydra`     |
-| pipx       | PyPi       | `scoutsuite`, `impacket`, `pymeta`                      |
-| Git        | GitHub     | `prowler`, `parsuite`, `evilgophish`, `kali-anonsurf`   |
-| Manual     | Local file | `nessus`, `burpsuite_enterprise`, `teamviewer`, `ninjaone` |
+The installer handles tools from multiple sources:
 
-## ⚙️ CLI Usage
+| Type       | Source     | Examples                                                       |
+|------------|------------|----------------------------------------------------------------|
+| APT        | Kali repos | `nmap`, `wireshark`, `sqlmap`, `metasploit-framework`, etc.    |
+| PIPX       | PyPI       | `scoutsuite`, `impacket`, `pymeta`, `trufflehog`, etc.         |
+| Git        | GitHub     | `prowler`, `parsuite`, `evilgophish`, `CyberChef`, etc.        |
+| Manual     | Various    | `nessus`, `burpsuite_enterprise`, `teamviewer`, etc.           |
 
-```bash
-# Clone repo
-git clone https://github.com/Richey-May-Cyber/RTABuilder.git
-cd RTABuilder/installer
+## ⚙️ Configuration
 
-# Run as root
-sudo ./installer.sh --core-only    # Fast install with just core tools
-sudo ./installer.sh --full         # Full install with GitHub tools, pipx, apt, and helpers
-```
-
-## 🧾 Configuration
-
-The YAML config at `/opt/security-tools/config.yml` contains the list of tools to install:
+The main configuration file is located at `/opt/security-tools/config/config.yml`:
 
 ```yaml
-apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,responder,metasploit-framework"
-pipx_tools: "scoutsuite,impacket,pymeta"
-git_tools: "https://github.com/prowler-cloud/prowler.git,https://github.com/ImpostorKeanu/parsuite.git,https://github.com/fin3ss3g0d/evilgophish.git,https://github.com/Und3rf10w/kali-anonsurf.git"
+# Core apt tools - installed with apt-get
+apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,..."
+
+# Python tools - installed with pipx
+pipx_tools: "scoutsuite,impacket,pymeta,fierce,pwnedpasswords,trufflehog,..."
+
+# GitHub repositories
+git_tools: "https://github.com/prowler-cloud/prowler.git,..."
+
+# Manual tools - installation helpers will be generated
+manual_tools: "nessus,vmware_remote_console,burpsuite_enterprise,teamviewer,ninjaone"
 ```
 
-## 🪛 Manual Tools
+## 📊 Reporting and Logging
 
-The script detects and builds helper scripts for tools that cannot be installed automatically:
+The installer maintains detailed logs for troubleshooting:
 
-| Tool                  | Notes                                               |
-|-----------------------|-----------------------------------------------------|
-| Nessus                | Downloads from Tenable and configures local web UI |
-| VMware Remote Console | Must be downloaded manually and run with `.bundle` |
-| Burp Suite Enterprise | Installs from local `.run` or `.jar`               |
-| TeamViewer Host       | Installs with workaround for deprecated dependency |
-| NinjaOne              | Installs via `wine` if present, or helper created  |
+- **Installation Report**: `/opt/security-tools/logs/installation_report_*.txt`
+- **Tool-specific Logs**: `/opt/security-tools/logs/<tool_name>_*.log`
+- **System Snapshot**: `/opt/security-tools/system-state/system-snapshot-*.txt`
 
-Helpers are saved to:
+## 🧰 Directory Structure
+
+```
+/opt/security-tools/
+├── bin/              # Executable symlinks
+├── config/           # Configuration files
+├── desktop/          # Desktop shortcuts
+├── helpers/          # Helper scripts for manual tools
+├── logs/             # Installation logs
+├── scripts/          # Utility scripts
+├── system-state/     # System snapshots
+├── temp/             # Temporary files
+└── venvs/            # Python virtual environments
+```
+
+## 📝 Manual Installation Helpers
+
+For tools that require manual installation, helper scripts are generated at `/opt/security-tools/helpers/`:
 
 ```bash
-/opt/security-tools/helpers/install_<tool>.sh
+# Example: Install Nessus
+sudo /opt/security-tools/helpers/install_nessus.sh
+
+# Example: Install TeamViewer
+sudo /opt/security-tools/helpers/install_teamviewer.sh
 ```
 
-Run them as needed:
+## 🔄 Redeployment
 
-```bash
-sudo /opt/security-tools/helpers/install_ninjaone.sh
-```
+To redeploy your RTA after a wipe:
 
-## 📜 Post-Install: Disable Lock Screen
+1. Boot up your fresh Kali Linux installation
+2. Download the deployment script:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/yourusername/rta-installer/main/deploy-rta.sh -o deploy-rta.sh
+   chmod +x deploy-rta.sh
+   ```
+3. Run the deployment script:
+   ```bash
+   sudo ./deploy-rta.sh --auto  # For fully automated installation
+   ```
 
-Optional script provided to ensure RTAs don’t lock during testing:
+## 🔧 Customization
 
-```bash
-chmod +x /opt/security-tools/scripts/disable-lock-screen.sh
-sudo /opt/security-tools/scripts/disable-lock-screen.sh
-```
+You can customize the installer by:
 
-Script disables screen lock in both GNOME and XFCE, and turns off DPMS.
+1. Modifying `/opt/security-tools/config/config.yml` to add/remove tools
+2. Creating custom deployment configurations in `/opt/security-tools/config/`
+3. Adding custom scripts to `/opt/security-tools/scripts/`
 
-## 📂 File Structure
+## 📋 Future Improvements
 
-```
-installer/
-├── installer.sh                      # Main entry point
-├── config.yml                        # List of tools to install
-├── helpers/                          # Manual install scripts
-├── logs/                             # Logs per tool and overall
-└── scripts/disable-lock-screen.sh    # Optional UX hardening
-```
+- Add support for containerized tools (Docker)
+- Implement tool version control and update mechanism
+- Add configuration profiles for different testing scenarios
+- Integrate with VM snapshotting for faster reversion
 
-## 🧪 Status
+## 📜 License
 
-✅ Fully tested on Kali 2024.1
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
