@@ -23,13 +23,37 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Directories and files
+REPO_DIR="$(pwd)"
 WORK_DIR="/opt/rta-deployment"
 TOOLS_DIR="/opt/security-tools"
-LOG_DIR="$WORK_DIR/logs"
-INSTALLER_SCRIPT="$WORK_DIR/rta_installer.sh"
-DETAILED_LOG="$LOG_DIR/deployment_$(date +%Y%m%d_%H%M%S).log"
-CONFIG_DIR="$WORK_DIR/config"
-CONFIG_FILE="$CONFIG_DIR/deployment.conf"
+INSTALLER_SCRIPT="$REPO_DIR/installer/rta_installer.sh"
+INSTALLED_INSTALLER="$WORK_DIR/rta_installer.sh"
+
+# Setup function to copy scripts to system locations
+setup_from_repo() {
+    print_status "Setting up RTA scripts from repository..."
+    
+    # Create directories
+    mkdir -p $WORK_DIR/scripts $TOOLS_DIR/scripts
+    
+    # Copy installer script
+    cp "$REPO_DIR/installer/rta_installer.sh" "$WORK_DIR/"
+    chmod +x "$WORK_DIR/rta_installer.sh"
+    
+    # Copy configuration
+    mkdir -p "$WORK_DIR/config"
+    cp "$REPO_DIR/installer/config.yml" "$WORK_DIR/config/"
+    
+    # Copy validation script
+    cp "$REPO_DIR/installer/scripts/validate-tools.sh" "$WORK_DIR/scripts/"
+    chmod +x "$WORK_DIR/scripts/validate-tools.sh"
+    
+    # Copy other scripts
+    cp "$REPO_DIR/installer/scripts/disable-lock-screen.sh" "$WORK_DIR/scripts/"
+    chmod +x "$WORK_DIR/scripts/disable-lock-screen.sh"
+    
+    print_success "Scripts copied to system locations."
+}
 
 # Flags
 AUTO_MODE=false
@@ -302,6 +326,13 @@ done
 
 # Main execution
 main() {
+    # Check if running from git repository
+    if [ -d ".git" ] || [ -f ".git" ]; then
+        print_info "Running from git repository."
+        setup_from_repo
+        # Use installed scripts from now on
+        INSTALLER_SCRIPT="$INSTALLED_INSTALLER"
+    fi
     # Print banner
     print_banner
     
