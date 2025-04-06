@@ -71,15 +71,15 @@ log_message() {
     esac
 }
 
-# Function to display a header
 display_header() {
     local text="$1"
     local width=70
     local padding=$(( (width - ${#text}) / 2 ))
+    local line=$(printf '%*s' "$width" | tr ' ' '=')
     
-    echo -e "\n${YELLOW}$("="%{$width}s)${NC}"
+    echo -e "\n${YELLOW}$line${NC}"
     printf "${YELLOW}%${padding}s%s%${padding}s${NC}\n" "" "$text" ""
-    echo -e "${YELLOW}$("="%{$width}s)${NC}\n"
+    echo -e "${YELLOW}$line${NC}\n"
 }
 
 # Function to cleanup on exit
