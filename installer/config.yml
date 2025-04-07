@@ -1,3 +1,105 @@
-apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,responder"
-pipx_tools: "scoutsuite,impacket,pymeta"
-git_tools: "https://github.com/prowler-cloud/prowler.git,https://github.com/ImpostorKeanu/parsuite.git"
+# RTA Tools Installer Configuration
+# Comprehensive config file for Kali Linux Remote Testing Appliance
+
+# Core apt tools - installed with apt-get
+apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,responder,metasploit-framework,exploitdb,nikto,dirb,dirbuster,whatweb,wpscan,masscan,aircrack-ng,john,hashcat,crackmapexec,enum4linux,gobuster,ffuf,steghide,binwalk,foremost,exiftool,httpie,rlwrap,nbtscan,ncat,netcat-traditional,netdiscover,dnsutils,whois,net-tools,putty,rdesktop,freerdp2-x11,snmp,golang,nodejs,npm,python3-dev,build-essential,xsltproc,parallel,wifite,theharvester,dsniff,macchanger,wordlists,dnsenum,dnsrecon,onesixtyone,snmpcheck,smbmap,sslscan,sslyze,nfs-common,tmux,screen,powershell,bloodhound,zaproxy,burpsuite,amass,hashid,hashcat-utils,medusa,crunch,recon-ng,fierce"
+
+# Python tools - installed with pipx
+pipx_tools: "scoutsuite,impacket,pymeta,fierce,pwnedpasswords,trufflehog,pydictor,apkleaks,wfuzz,hakrawler,sublist3r,nuclei,recon-ng,commix,evil-winrm,droopescan,sshuttle,gitleaks,stegcracker,pypykatz,witnessme,ldapdomaindump,bloodhound-python,certipy,cve-search,dirsearch,wprecon,wafw00f,crosslinked,autorecon,subjack,tldextract,s3scanner,subfinder"
+
+# GitHub repositories
+git_tools: "https://github.com/prowler-cloud/prowler.git,https://github.com/ImpostorKeanu/parsuite.git,https://github.com/fin3ss3g0d/evilgophish.git,https://github.com/Und3rf10w/kali-anonsurf.git,https://github.com/s0md3v/XSStrike.git,https://github.com/swisskyrepo/PayloadsAllTheThings.git,https://github.com/danielmiessler/SecLists.git,https://github.com/internetwache/GitTools.git,https://github.com/digininja/CeWL.git,https://github.com/gchq/CyberChef.git,https://github.com/Kevin-Robertson/Inveigh.git,https://github.com/projectdiscovery/nuclei.git,https://github.com/m8sec/pymeta.git,https://github.com/FortyNorthSecurity/EyeWitness.git,https://github.com/dievus/threader3000.git,https://github.com/carlospolop/PEASS-ng.git,https://github.com/ticarpi/jwt_tool.git,https://github.com/ShutdownRepo/LinEnum.git,https://github.com/maurosoria/dirsearch.git,https://github.com/mdsecactivebreach/o365-attack-toolkit.git,https://github.com/AlessandroZ/LaZagne.git,https://github.com/secretsquirrel/the-backdoor-factory.git,https://github.com/byt3bl33d3r/SprayingToolkit.git,https://github.com/BC-SECURITY/Empire.git,https://github.com/CoreSecurity/impacket.git,https://github.com/BloodHoundAD/BloodHound.git"
+
+# Manual tools - installation helpers will be generated
+manual_tools: "nessus,vmware_remote_console,burpsuite_enterprise,teamviewer,ninjaone,gophish,evilginx3,metasploit-framework,cobalt-strike,covenant,sliver,powershell-empire,bfg"
+
+# Tool configuration settings
+tool_settings:
+  # Metasploit configuration
+  metasploit:
+    db_enabled: true
+    auto_update: true
+  
+  # Nessus configuration
+  nessus:
+    port: 8834
+    auto_start: true
+    
+  # Proxy settings
+  proxy:
+    enable_global_proxy: false
+    proxy_address: "127.0.0.1"
+    proxy_port: 8080
+    
+  # Browser configurations
+  browsers:
+    install_firefox_extensions: true
+    firefox_extensions:
+      - "foxyproxy"
+      - "wappalyzer"
+      - "user-agent-switcher"
+    
+  # Network settings
+  network:
+    disable_ipv6: true
+    preserve_mac_address: true
+    disable_network_manager_auto_connect: true
+    
+  # System settings
+  system:
+    disable_screen_lock: true
+    disable_power_management: true
+    disable_auto_updates: true
+    disable_bluetooth: true
+    use_zsh: true
+    set_bash_aliases: true
+
+# Desktop integration settings
+desktop:
+  create_shortcuts: true
+  categories:
+    - "Reconnaissance"
+    - "Vulnerability Analysis"
+    - "Web Application"
+    - "Password Attacks"
+    - "Exploitation"
+    - "Post Exploitation"
+    - "Reporting"
+  web_shortcuts:
+    - name: "VirusTotal"
+      url: "https://www.virustotal.com"
+    - name: "ExploitDB"
+      url: "https://www.exploit-db.com"
+    - name: "MITRE ATT&CK"
+      url: "https://attack.mitre.org"
+    - name: "CVE Details"
+      url: "https://cvedetails.com"
+    - name: "HaveIBeenPwned"
+      url: "https://haveibeenpwned.com"
+    - name: "OSINT Framework"
+      url: "https://osintframework.com"
+    - name: "Shodan"
+      url: "https://www.shodan.io"
+
+# Environment settings
+environment:
+  setup_path: true
+  setup_aliases: true
+  setup_completion: true
+  setup_tmux_config: true
+  default_shell: "bash"
+  custom_prompt: true
+
+# Update and validation settings
+validation:
+  validate_after_install: true
+  auto_fix_failures: true
+  create_validation_report: true
+  check_tool_versions: true
+  
+# Logging settings
+logging:
+  verbose: false
+  save_logs: true
+  log_level: "info"
+  create_system_snapshot: true
