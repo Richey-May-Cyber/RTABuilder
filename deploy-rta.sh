@@ -300,7 +300,7 @@ chmod +x /opt/security-tools/helpers/install_nessus.sh
 # Create TeamViewer installation script
 cat > /opt/security-tools/helpers/install_teamviewer.sh << 'ENDOFTVSCRIPT'
 #!/bin/bash
-# TeamViewer Host Installer Script with PolicyKit1 fix for Kali Linux
+# TeamViewer Host Installer with simple PolicyKit fix and headless configuration
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -343,7 +343,7 @@ fi
 
 # Check if we're on Kali Linux and need the PolicyKit1 fix
 if grep -q "Kali" /etc/os-release; then
-  log "INFO" "Kali Linux detected, applying PolicyKit1 workaround..."
+  log "INFO" "Kali Linux detected, applying simplified PolicyKit1 workaround..."
   
   # Install equivs if not present
   if ! command -v equivs-control &>/dev/null; then
@@ -360,15 +360,12 @@ if grep -q "Kali" /etc/os-release; then
   log "INFO" "Generating policykit-1 template..."
   equivs-control policykit-1
   
-  # Edit the template
-  log "INFO" "Creating policykit-1 dummy package..."
-  # Get polkitd version if available
-  POLKIT_VERSION=$(dpkg -l | grep polkitd | awk '{print $3}' || echo "124-3")
-  
-  # Edit template
+  # Edit the template to create a minimal dummy package
+  log "INFO" "Creating minimal policykit-1 dummy package..."
   sed -i "s/^#Package: .*/Package: policykit-1/" policykit-1
-  sed -i "s/^#Version: .*/Version: $POLKIT_VERSION/" policykit-1
-  sed -i "s/^#Depends: .*/Depends: pkexec, polkitd/" policykit-1
+  sed -i "s/^#Version: .*/Version: 124-3/" policykit-1
+  # Remove the Depends line completely rather than adding polkitd dependency
+  sed -i "/^#Depends:/d" policykit-1
   sed -i "/^Description:/,$ s/^.*$/Description: Dummy package for TeamViewer dependency/" policykit-1
   
   # Build package
@@ -380,7 +377,7 @@ if grep -q "Kali" /etc/os-release; then
   apt-get install -y ./policykit-1_*_all.deb
   
   # Cleanup
-  cd -
+  cd - > /dev/null
   rm -rf "$TEMP_DIR"
 fi
 
@@ -425,18 +422,57 @@ teamviewer setup --grant-easy-access || true
 log "INFO" "Disabling commercial usage notification..."
 teamviewer config set General\\CUNotification 0 || true
 
+# Configure TeamViewer for headless operation
+log "INFO" "Configuring TeamViewer for headless operation..."
+
+# Disable waiting for X server
+log "INFO" "Disabling X server dependency..."
+teamviewer option set General/WaitForX false || true
+
+# Set AutoConnect to true
+log "INFO" "Enabling auto connect..."
+teamviewer option set General/AutoConnect true || true
+
+# Configure for auto start with system
+log "INFO" "Enabling autostart..."
+teamviewer daemon enable || true
+systemctl enable teamviewerd || true
+
+# Prevent TeamViewer from showing dialog boxes
+log "INFO" "Suppressing dialog boxes..."
+teamviewer option set General/SuppressDialogs true || true
+
+# Prevent GUI from opening by updating the global config
+if [ -f "/etc/teamviewer/global.conf" ]; then
+  log "INFO" "Updating global configuration..."
+  # Backup existing config
+  cp /etc/teamviewer/global.conf /etc/teamviewer/global.conf.bak
+  # Set ClientGuiRequired=false
+  if grep -q "ClientGuiRequired" /etc/teamviewer/global.conf; then
+    sed -i 's/ClientGuiRequired=.*/ClientGuiRequired=false/' /etc/teamviewer/global.conf
+  else
+    echo "ClientGuiRequired=false" >> /etc/teamviewer/global.conf
+  fi
+else
+  # Create global config if it doesn't exist
+  log "INFO" "Creating global configuration..."
+  mkdir -p /etc/teamviewer
+  echo "ClientGuiRequired=false" > /etc/teamviewer/global.conf
+fi
+
 # Restart TeamViewer to apply all settings
 log "INFO" "Restarting TeamViewer service..."
 teamviewer --daemon restart || true
+sleep 5
 
 # Display the TeamViewer ID for reference
-sleep 5
 TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
 if [ -n "$TV_ID" ]; then
-  log "SUCCESS" "TeamViewer Host installation completed successfully!"
+  log "SUCCESS" "TeamViewer Host installation and headless configuration completed!"
   log "INFO" "TeamViewer ID: $TV_ID"
 else
   log "WARNING" "TeamViewer installation completed, but could not retrieve ID."
+  log "INFO" "Check TeamViewer status with: systemctl status teamviewerd"
 fi
 
 exit 0
