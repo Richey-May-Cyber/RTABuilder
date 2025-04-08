@@ -40,15 +40,7 @@ prompt_continue() {
   esac
 }
 
-download_  # Disable screen lock if script exists
-  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
-    # Disable screen lock if script exists
-  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
-  file() {
+download_file() {
   local url="$1"
   local output_file="$2"
   local description="$3"
@@ -144,6 +136,9 @@ if ! $SKIP_DOWNLOADS; then
   if $AUTO_MODE || prompt_continue "downloading required tools"; then
     print_status "Downloading required tools..."
     
+    # We'll skip separate Burp Suite download since we're using the GitHub installer
+    print_info "Burp Suite Professional will be downloaded by its installer script"
+    
     # Download Nessus
     download_file "https://www.tenable.com/downloads/api/v1/public/pages/nessus/downloads/18189/download?i_agree_to_tenable_license_agreement=true" \
       "/opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb" \
@@ -153,7 +148,7 @@ if ! $SKIP_DOWNLOADS; then
     download_file "https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb" \
       "/opt/rta-deployment/downloads/teamviewer-host_amd64.deb" \
       "TeamViewer Host"
-    
+      
     # Download NinjaOne Agent
     download_file "https://app.ninjarmm.com/agent/installer/fc75fb12-9ee2-4f8d-8319-8df4493a9fb9/8.0.2891/NinjaOne-Agent-PentestingDevices-MainOffice-Auto-x86-64.deb" \
       "/opt/rta-deployment/downloads/NinjaOne-Agent.deb" \
@@ -183,6 +178,156 @@ else
 fi
 ENDOFBURPSCRIPT
 chmod +x /opt/security-tools/helpers/install_burpsuite.sh
+
+# Create Nessus helper script
+cat > /opt/security-tools/helpers/install_nessus.sh << 'ENDOFNESSUSSCRIPT'
+#!/bin/bash
+# Helper script to install Nessus
+
+# Check if the DEB package exists
+if [ -f "/opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb" ]; then
+  echo "Installing Nessus..."
+  apt-get update
+  dpkg -i /opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb || {
+    apt-get -f install -y  # Fix broken dependencies if any
+    dpkg -i /opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb
+  }
+  
+  # Start Nessus service
+  systemctl start nessusd
+  systemctl enable nessusd
+  
+  echo "Nessus installed successfully"
+  echo "Open https://localhost:8834/ to complete setup"
+else
+  echo "Nessus DEB package not found. Please download it first."
+  exit 1
+fi
+ENDOFNESSUSSCRIPT
+chmod +x /opt/security-tools/helpers/install_nessus.sh
+
+# Create TeamViewer helper script
+cat > /opt/security-tools/helpers/install_teamviewer.sh << 'ENDOFTVSCRIPT'
+#!/bin/bash
+# TeamViewer Host Installer Script with Assignment
+
+# Exit on error with controlled error handling
+set +e
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration Variables
+TV_PACKAGE="/opt/rta-deployment/downloads/teamviewer-host_amd64.deb"
+ASSIGNMENT_TOKEN="25998227-v1SCqDinbXPh3pHnBv7s"  # Your assignment token
+GROUP_ID="g12345"  # Replace with your actual group ID
+ALIAS_PREFIX="$(hostname)-"  # Device names will be hostname + timestamp
+
+# Function to log messages
+log() {
+  local level="$1"
+  local message="$2"
+  
+  case "$level" in
+    "INFO")   echo -e "${BLUE}[i] $message${NC}" ;;
+    "SUCCESS") echo -e "${GREEN}[+] $message${NC}" ;;
+    "ERROR")  echo -e "${RED}[-] $message${NC}" ;;
+    "WARNING") echo -e "${YELLOW}[!] $message${NC}" ;;
+    *)        echo -e "${YELLOW}[*] $message${NC}" ;;
+  esac
+}
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+  log "ERROR" "Please run as root or with sudo"
+  exit 1
+fi
+
+# Check if the DEB package exists
+if [ ! -f "$TV_PACKAGE" ]; then
+  log "WARNING" "TeamViewer Host package not found at $TV_PACKAGE"
+  
+  # Try to download it
+  log "INFO" "Attempting to download TeamViewer Host..."
+  mkdir -p "$(dirname "$TV_PACKAGE")"
+  wget https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb -O "$TV_PACKAGE" || {
+    log "ERROR" "Failed to download TeamViewer Host package"
+    exit 1
+  }
+fi
+
+# Install TeamViewer
+log "STATUS" "Installing TeamViewer Host..."
+apt-get update
+dpkg -i "$TV_PACKAGE" || {
+  log "INFO" "Fixing dependencies..."
+  apt-get -f install -y
+  dpkg -i "$TV_PACKAGE" || {
+    log "ERROR" "Failed to install TeamViewer Host"
+    exit 1
+  }
+}
+
+# Wait for TeamViewer service to start
+log "INFO" "Waiting for TeamViewer service to initialize..."
+systemctl start teamviewerd
+sleep 10
+
+# Assign to your TeamViewer account using the assignment token
+log "STATUS" "Assigning device to your TeamViewer account..."
+teamviewer --daemon start
+
+if [ -n "$ASSIGNMENT_TOKEN" ]; then
+  log "INFO" "Using assignment token: $ASSIGNMENT_TOKEN"
+  teamviewer assignment --token "$ASSIGNMENT_TOKEN" || {
+    log "WARNING" "Failed to assign with token. Please check the token and try manually."
+  }
+else
+  log "WARNING" "No assignment token provided. Device will need manual assignment."
+fi
+
+# Set a custom alias for this device
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
+DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
+log "INFO" "Setting device alias to: $DEVICE_ALIAS"
+teamviewer alias "$DEVICE_ALIAS" || log "WARNING" "Failed to set alias"
+
+# Assign to specific group (if specified)
+if [ -n "$GROUP_ID" ]; then
+  log "INFO" "Assigning to group: $GROUP_ID"
+  teamviewer assignment --group-id "$GROUP_ID" || log "WARNING" "Failed to assign to group"
+fi
+
+# Configure TeamViewer for unattended access (no password needed)
+log "INFO" "Configuring for unattended access..."
+teamviewer setup --grant-easy-access || log "WARNING" "Failed to configure unattended access"
+
+# Disable commercial usage notification (available in corporate license)
+log "INFO" "Disabling commercial usage notification..."
+teamviewer config set General\\CUNotification 0 || log "WARNING" "Failed to disable commercial usage notification"
+
+# Restart TeamViewer to apply all settings
+log "INFO" "Restarting TeamViewer service..."
+teamviewer --daemon restart
+
+# Display the TeamViewer ID for reference
+TV_ID=$(teamviewer info | grep "TeamViewer ID:" | awk '{print $3}')
+if [ -n "$TV_ID" ]; then
+  log "SUCCESS" "TeamViewer Host installation completed successfully!"
+  log "INFO" "TeamViewer ID: $TV_ID"
+  log "INFO" "This device is now accessible through your TeamViewer business account."
+else
+  log "WARNING" "TeamViewer installation completed, but could not retrieve ID."
+  log "INFO" "Check TeamViewer status with: teamviewer info"
+fi
+
+exit 0
+ENDOFTVSCRIPT
+chmod +x /opt/security-tools/helpers/install_teamviewer.sh
 
 # Create NinjaOne Agent helper script
 cat > /opt/security-tools/helpers/install_ninjaone.sh << 'ENDOFNINJASCRIPT'
@@ -217,33 +362,6 @@ fi
 ENDOFNINJASCRIPT
 chmod +x /opt/security-tools/helpers/install_ninjaone.sh
 
-# Create Nessus helper script
-cat > /opt/security-tools/helpers/install_nessus.sh << 'ENDOFNESSUSSCRIPT'
-#!/bin/bash
-# Helper script to install Nessus
-
-# Check if the DEB package exists
-if [ -f "/opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb" ]; then
-  echo "Installing Nessus..."
-  apt-get update
-  dpkg -i /opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb || {
-    apt-get -f install -y  # Fix broken dependencies if any
-    dpkg -i /opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb
-  }
-  
-  # Start Nessus service
-  systemctl start nessusd
-  systemctl enable nessusd
-  
-  echo "Nessus installed successfully"
-  echo "Open https://localhost:8834/ to complete setup"
-else
-  echo "Nessus DEB package not found. Please download it first."
-  exit 1
-fi
-ENDOFNESSUSSCRIPT
-chmod +x /opt/security-tools/helpers/install_nessus.sh
-
 # Copy validation script if it exists locally, otherwise create a minimal one
 if [ -f "installer/scripts/validate-tools.sh" ]; then
   print_status "Copying validation script..."
@@ -251,10 +369,11 @@ if [ -f "installer/scripts/validate-tools.sh" ]; then
   chmod +x /opt/security-tools/scripts/validate-tools.sh
 else
   print_status "Creating validation script..."
-  cat > /opt/security-tools/scripts/validate-tools.sh << 'echo "Validating tools..."
-which nmap > /dev/null && echo "✓ nmap found" || echo "✗ nmap not found"
-which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"'
+  cat > /opt/security-tools/scripts/validate-tools.sh << 'ENDOFVALSCRIPT'
 #!/bin/bash
+echo "Validating tools..."
+which nmap > /dev/null && echo "✓ nmap found" || echo "✗ nmap not found"
+which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"
 test -f "/usr/bin/burpsuite" && echo "✓ Burp Suite Professional found" || echo "✗ Burp Suite Professional not found"
 systemctl status nessusd &>/dev/null && echo "✓ Nessus service found" || echo "✗ Nessus service not found"
 which teamviewer &>/dev/null && echo "✓ TeamViewer found" || echo "✗ TeamViewer not found"
@@ -280,7 +399,7 @@ if $AUTO_MODE; then
   /opt/rta-deployment/rta_installer.sh
   
   # Install Burp Suite
-  print_status "Installing Burp Suite..."
+  print_status "Installing Burp Suite Professional..."
   /opt/security-tools/helpers/install_burpsuite.sh
   
   # Install Nessus
@@ -294,6 +413,12 @@ if $AUTO_MODE; then
   # Install NinjaOne Agent
   print_status "Installing NinjaOne Agent..."
   /opt/security-tools/helpers/install_ninjaone.sh
+  
+  # Disable screen lock if script exists
+  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
+    print_status "Disabling screen lock..."
+    /opt/security-tools/scripts/disable-lock-screen.sh
+  fi
 else
   # Interactive mode - prompt for each step
   
@@ -304,8 +429,8 @@ else
   fi
   
   # Install Burp Suite
-  if prompt_continue "installing Burp Suite"; then
-    print_status "Installing Burp Suite..."
+  if prompt_continue "installing Burp Suite Professional"; then
+    print_status "Installing Burp Suite Professional..."
     /opt/security-tools/helpers/install_burpsuite.sh
   fi
   
@@ -325,6 +450,12 @@ else
   if prompt_continue "installing NinjaOne Agent"; then
     print_status "Installing NinjaOne Agent..."
     /opt/security-tools/helpers/install_ninjaone.sh
+  fi
+  
+  # Disable screen lock if script exists
+  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
+    print_status "Disabling screen lock..."
+    /opt/security-tools/scripts/disable-lock-screen.sh
   fi
 fi
 
@@ -379,4 +510,11 @@ if command -v teamviewer &>/dev/null; then
   if [ -n "$TV_ID" ]; then
     print_info "TeamViewer ID: $TV_ID"
   fi
+fi
+
+# If NinjaOne was installed, show confirmation
+if systemctl status ninjarmm-agent &>/dev/null; then
+  echo ""
+  print_info "NinjaOne Agent has been installed and is running."
+  print_info "The device should appear in your NinjaOne dashboard shortly."
 fi
