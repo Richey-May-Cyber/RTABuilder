@@ -60,6 +60,33 @@ download_file() {
   return 0
 }
 
+# Function to run a command/script with error handling
+run_with_fallback() {
+  local cmd="$1"
+  local description="$2"
+  local timeout_seconds="${3:-300}"  # Default timeout of 5 minutes
+  
+  print_status "Running $description..."
+  
+  # Run the command with a timeout
+  timeout $timeout_seconds $cmd
+  local result=$?
+  
+  # Check the result
+  if [ $result -eq 0 ]; then
+    print_success "$description completed successfully"
+    return 0
+  elif [ $result -eq 124 ]; then
+    print_error "$description timed out after $timeout_seconds seconds"
+    print_info "Continuing with deployment anyway..."
+    return 1
+  else
+    print_error "$description failed with exit code $result"
+    print_info "Continuing with deployment anyway..."
+    return 1
+  fi
+}
+
 # Check root
 if [ "$EUID" -ne 0 ]; then
   print_error "Please run as root"
@@ -165,13 +192,44 @@ cat > /opt/security-tools/helpers/install_burpsuite.sh << 'ENDOFBURPSCRIPT'
 # Helper script to install Burp Suite Professional using GitHub repo
 
 echo "Installing Burp Suite Professional using the GitHub repository installer..."
+
+# Create a temp directory for installation
+TEMP_DIR=$(mktemp -d)
+cd "$TEMP_DIR"
+
+# Download the installer script
+echo "Downloading installer script..."
+wget -q https://raw.githubusercontent.com/xiv3r/Burpsuite-Professional/main/install.sh -O burp_installer.sh
+chmod +x burp_installer.sh
+
+# Run the installer with a timeout to prevent hanging
+echo "Running installer (this may take a few minutes)..."
+timeout 300 ./burp_installer.sh
+
+# Check if timeout occurred
+if [ $? -eq 124 ]; then
+  echo "The Burp Suite installation timed out after 5 minutes."
+  echo "This might be because it's waiting for a license key input."
   
-# Download and run the installer from GitHub
-wget -qO- https://raw.githubusercontent.com/xiv3r/Burpsuite-Professional/main/install.sh | bash
+  # Try to clean up any running Java processes related to Burp
+  echo "Cleaning up any hanging processes..."
+  pkill -f "java.*burp" || true
+  
+  # Check if at least the main executable was installed
+  if [ -f "/usr/bin/burpsuite" ]; then
+    echo "Burp Suite executable was found. Installation may be partially complete."
+    echo "You'll need to manually activate the license later."
+    exit 0
+  else
+    echo "Burp Suite installation appears to have failed. The executable was not found."
+    exit 1
+  fi
+fi
 
 # Check if installation was successful
 if [ -f "/usr/bin/burpsuite" ]; then
   echo "Burp Suite Professional installed successfully"
+  exit 0
 else
   echo "Burp Suite Professional installation may have failed. Please check logs for details."
   exit 1
@@ -395,67 +453,55 @@ if $AUTO_MODE; then
   print_status "Running installer in automatic mode..."
   
   # Run main installer script
-  print_status "Running main installer script..."
-  /opt/rta-deployment/rta_installer.sh
+  run_with_fallback "/opt/rta-deployment/rta_installer.sh" "main installer script" 600
   
   # Install Burp Suite
-  print_status "Installing Burp Suite Professional..."
-  /opt/security-tools/helpers/install_burpsuite.sh
+  run_with_fallback "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
   
   # Install Nessus
-  print_status "Installing Nessus..."
-  /opt/security-tools/helpers/install_nessus.sh
+  run_with_fallback "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
   
   # Install TeamViewer
-  print_status "Installing TeamViewer..."
-  /opt/security-tools/helpers/install_teamviewer.sh
+  run_with_fallback "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
   
   # Install NinjaOne Agent
-  print_status "Installing NinjaOne Agent..."
-  /opt/security-tools/helpers/install_ninjaone.sh
+  run_with_fallback "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
   
   # Disable screen lock if script exists
   if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
+    run_with_fallback "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
   fi
 else
   # Interactive mode - prompt for each step
   
   # Run main installer script
   if prompt_continue "running the main installer script"; then
-    print_status "Running main installer script..."
-    /opt/rta-deployment/rta_installer.sh
+    run_with_fallback "/opt/rta-deployment/rta_installer.sh" "main installer script" 600
   fi
   
   # Install Burp Suite
   if prompt_continue "installing Burp Suite Professional"; then
-    print_status "Installing Burp Suite Professional..."
-    /opt/security-tools/helpers/install_burpsuite.sh
+    run_with_fallback "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
   fi
   
   # Install Nessus
   if prompt_continue "installing Nessus"; then
-    print_status "Installing Nessus..."
-    /opt/security-tools/helpers/install_nessus.sh
+    run_with_fallback "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
   fi
   
   # Install TeamViewer
   if prompt_continue "installing TeamViewer"; then
-    print_status "Installing TeamViewer..."
-    /opt/security-tools/helpers/install_teamviewer.sh
+    run_with_fallback "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
   fi
   
   # Install NinjaOne Agent
   if prompt_continue "installing NinjaOne Agent"; then
-    print_status "Installing NinjaOne Agent..."
-    /opt/security-tools/helpers/install_ninjaone.sh
+    run_with_fallback "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
   fi
   
   # Disable screen lock if script exists
   if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
+    run_with_fallback "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
   fi
 fi
 
@@ -517,4 +563,12 @@ if systemctl status ninjarmm-agent &>/dev/null; then
   echo ""
   print_info "NinjaOne Agent has been installed and is running."
   print_info "The device should appear in your NinjaOne dashboard shortly."
+fi
+
+# If Burp Suite was installed but might need manual activation
+if [ -f "/usr/bin/burpsuite" ]; then
+  echo ""
+  print_info "Burp Suite Professional has been installed."
+  print_info "If the installer timed out, you may need to run it manually to activate:"
+  print_info "sudo /usr/bin/burpsuite"
 fi
