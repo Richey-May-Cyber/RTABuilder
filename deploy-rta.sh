@@ -40,7 +40,15 @@ prompt_continue() {
   esac
 }
 
-download_file() {
+download_  # Disable screen lock if script exists
+  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
+    print_status "Disabling screen lock..."
+    /opt/security-tools/scripts/disable-lock-screen.sh
+    # Disable screen lock if script exists
+  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
+    print_status "Disabling screen lock..."
+    /opt/security-tools/scripts/disable-lock-screen.sh
+  file() {
   local url="$1"
   local output_file="$2"
   local description="$3"
@@ -136,9 +144,6 @@ if ! $SKIP_DOWNLOADS; then
   if $AUTO_MODE || prompt_continue "downloading required tools"; then
     print_status "Downloading required tools..."
     
-    # We'll skip separate Burp Suite download since we're using the GitHub installer
-    print_info "Burp Suite Professional will be downloaded by its installer script"
-    
     # Download Nessus
     download_file "https://www.tenable.com/downloads/api/v1/public/pages/nessus/downloads/18189/download?i_agree_to_tenable_license_agreement=true" \
       "/opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb" \
@@ -148,6 +153,11 @@ if ! $SKIP_DOWNLOADS; then
     download_file "https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb" \
       "/opt/rta-deployment/downloads/teamviewer-host_amd64.deb" \
       "TeamViewer Host"
+    
+    # Download NinjaOne Agent
+    download_file "https://app.ninjarmm.com/agent/installer/fc75fb12-9ee2-4f8d-8319-8df4493a9fb9/8.0.2891/NinjaOne-Agent-PentestingDevices-MainOffice-Auto-x86-64.deb" \
+      "/opt/rta-deployment/downloads/NinjaOne-Agent.deb" \
+      "NinjaOne Agent"
   fi
 fi
 
@@ -173,6 +183,39 @@ else
 fi
 ENDOFBURPSCRIPT
 chmod +x /opt/security-tools/helpers/install_burpsuite.sh
+
+# Create NinjaOne Agent helper script
+cat > /opt/security-tools/helpers/install_ninjaone.sh << 'ENDOFNINJASCRIPT'
+#!/bin/bash
+# Helper script to install NinjaOne Agent
+
+# Check if the DEB package exists
+if [ -f "/opt/rta-deployment/downloads/NinjaOne-Agent.deb" ]; then
+  echo "Installing NinjaOne Agent..."
+  
+  # Install the DEB package
+  apt-get update
+  dpkg -i /opt/rta-deployment/downloads/NinjaOne-Agent.deb || {
+    echo "Fixing dependencies..."
+    apt-get -f install -y
+    dpkg -i /opt/rta-deployment/downloads/NinjaOne-Agent.deb
+  }
+  
+  # Check if service is running
+  systemctl status ninjarmm-agent &>/dev/null
+  if [ $? -eq 0 ]; then
+    echo "NinjaOne Agent installed successfully and service is running"
+  else
+    echo "Starting NinjaOne Agent service..."
+    systemctl start ninjarmm-agent
+    echo "NinjaOne Agent installed"
+  fi
+else
+  echo "NinjaOne Agent DEB package not found. Please download it first."
+  exit 1
+fi
+ENDOFNINJASCRIPT
+chmod +x /opt/security-tools/helpers/install_ninjaone.sh
 
 # Create Nessus helper script
 cat > /opt/security-tools/helpers/install_nessus.sh << 'ENDOFNESSUSSCRIPT'
@@ -201,34 +244,6 @@ fi
 ENDOFNESSUSSCRIPT
 chmod +x /opt/security-tools/helpers/install_nessus.sh
 
-# Create TeamViewer helper script
-cat > /opt/security-tools/helpers/install_teamviewer.sh << 'ENDOFTVSCRIPT'
-#!/bin/bash
-# Helper script to install TeamViewer Host
-
-# Check if the DEB package exists
-if [ -f "/opt/rta-deployment/downloads/teamviewer-host_amd64.deb" ]; then
-  echo "Installing TeamViewer Host..."
-  apt-get update
-  dpkg -i /opt/rta-deployment/downloads/teamviewer-host_amd64.deb || {
-    apt-get -f install -y  # Fix broken dependencies if any
-    dpkg -i /opt/rta-deployment/downloads/teamviewer-host_amd64.deb
-  }
-  
-  # Configure TeamViewer (optional - uncomment and modify as needed)
-  # ASSIGNMENT_TOKEN="your-token-here"  # Get this from your TeamViewer Management Console
-  # teamviewer assignment --token $ASSIGNMENT_TOKEN
-  
-  echo "TeamViewer Host installed successfully"
-  TV_ID=$(teamviewer info | grep "TeamViewer ID:" | awk '{print $3}')
-  echo "TeamViewer ID: $TV_ID"
-else
-  echo "TeamViewer Host DEB package not found. Please download it first."
-  exit 1
-fi
-ENDOFTVSCRIPT
-chmod +x /opt/security-tools/helpers/install_teamviewer.sh
-
 # Copy validation script if it exists locally, otherwise create a minimal one
 if [ -f "installer/scripts/validate-tools.sh" ]; then
   print_status "Copying validation script..."
@@ -236,14 +251,14 @@ if [ -f "installer/scripts/validate-tools.sh" ]; then
   chmod +x /opt/security-tools/scripts/validate-tools.sh
 else
   print_status "Creating validation script..."
-  cat > /opt/security-tools/scripts/validate-tools.sh << 'ENDOFVALSCRIPT'
-#!/bin/bash
-echo "Validating tools..."
+  cat > /opt/security-tools/scripts/validate-tools.sh << 'echo "Validating tools..."
 which nmap > /dev/null && echo "✓ nmap found" || echo "✗ nmap not found"
-which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"
+which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"'
+#!/bin/bash
 test -f "/usr/bin/burpsuite" && echo "✓ Burp Suite Professional found" || echo "✗ Burp Suite Professional not found"
 systemctl status nessusd &>/dev/null && echo "✓ Nessus service found" || echo "✗ Nessus service not found"
 which teamviewer &>/dev/null && echo "✓ TeamViewer found" || echo "✗ TeamViewer not found"
+systemctl status ninjarmm-agent &>/dev/null && echo "✓ NinjaOne Agent found" || echo "✗ NinjaOne Agent not found"
 ENDOFVALSCRIPT
   chmod +x /opt/security-tools/scripts/validate-tools.sh
 fi
@@ -276,11 +291,9 @@ if $AUTO_MODE; then
   print_status "Installing TeamViewer..."
   /opt/security-tools/helpers/install_teamviewer.sh
   
-  # Disable screen lock if script exists
-  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
-  fi
+  # Install NinjaOne Agent
+  print_status "Installing NinjaOne Agent..."
+  /opt/security-tools/helpers/install_ninjaone.sh
 else
   # Interactive mode - prompt for each step
   
@@ -308,10 +321,10 @@ else
     /opt/security-tools/helpers/install_teamviewer.sh
   fi
   
-  # Disable screen lock if script exists
-  if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
-    print_status "Disabling screen lock..."
-    /opt/security-tools/scripts/disable-lock-screen.sh
+  # Install NinjaOne Agent
+  if prompt_continue "installing NinjaOne Agent"; then
+    print_status "Installing NinjaOne Agent..."
+    /opt/security-tools/helpers/install_ninjaone.sh
   fi
 fi
 
