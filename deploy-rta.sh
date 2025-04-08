@@ -136,10 +136,8 @@ if ! $SKIP_DOWNLOADS; then
   if $AUTO_MODE || prompt_continue "downloading required tools"; then
     print_status "Downloading required tools..."
     
-    # Download Burp Suite
-    download_file "https://portswigger.net/burp/releases/download?product=community&version=2023.1.2&type=Jar" \
-      "/opt/rta-deployment/downloads/burpsuite_community.jar" \
-      "Burp Suite Community Edition"
+    # We'll skip separate Burp Suite download since we're using the GitHub installer
+    print_info "Burp Suite Professional will be downloaded by its installer script"
     
     # Download Nessus
     download_file "https://www.tenable.com/downloads/api/v1/public/pages/nessus/downloads/18189/download?i_agree_to_tenable_license_agreement=true" \
@@ -156,46 +154,21 @@ fi
 # Create tool installation helpers
 print_status "Creating tool installation helpers..."
 
-# Create Burp Suite helper script
+# Create Burp Suite Professional helper script
 cat > /opt/security-tools/helpers/install_burpsuite.sh << 'ENDOFBURPSCRIPT'
 #!/bin/bash
-# Helper script to install Burp Suite
+# Helper script to install Burp Suite Professional using GitHub repo
 
-# Check if Java is installed
-if ! command -v java &>/dev/null; then
-  echo "Installing Java..."
-  apt-get update
-  apt-get install -y default-jre
-fi
-
-# Check if the JAR exists
-if [ -f "/opt/rta-deployment/downloads/burpsuite_community.jar" ]; then
-  echo "Installing Burp Suite..."
-  mkdir -p /opt/BurpSuiteCommunity
-  cp /opt/rta-deployment/downloads/burpsuite_community.jar /opt/BurpSuiteCommunity/
+echo "Installing Burp Suite Professional using the GitHub repository installer..."
   
-  # Create launcher script
-  cat > /usr/local/bin/burpsuite << 'ENDOFSCRIPT'
-#!/bin/bash
-java -jar /opt/BurpSuiteCommunity/burpsuite_community.jar "$@"
-ENDOFSCRIPT
-  chmod +x /usr/local/bin/burpsuite
-  
-  # Create desktop shortcut
-  cat > /usr/share/applications/burpsuite.desktop << 'ENDOFDESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Burp Suite Community
-Comment=Web Security Testing Tool
-Exec=java -jar /opt/BurpSuiteCommunity/burpsuite_community.jar
-Icon=burpsuite
-Terminal=false
-Categories=Security;Application;Network;
-ENDOFDESKTOP
+# Download and run the installer from GitHub
+wget -qO- https://raw.githubusercontent.com/xiv3r/Burpsuite-Professional/main/install.sh | bash
 
-  echo "Burp Suite Community installed successfully"
+# Check if installation was successful
+if [ -f "/usr/bin/burpsuite" ]; then
+  echo "Burp Suite Professional installed successfully"
 else
-  echo "Burp Suite JAR file not found. Please download it first."
+  echo "Burp Suite Professional installation may have failed. Please check logs for details."
   exit 1
 fi
 ENDOFBURPSCRIPT
@@ -268,7 +241,7 @@ else
 echo "Validating tools..."
 which nmap > /dev/null && echo "✓ nmap found" || echo "✗ nmap not found"
 which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"
-test -f "/opt/BurpSuiteCommunity/burpsuite_community.jar" && echo "✓ Burp Suite found" || echo "✗ Burp Suite not found"
+test -f "/usr/bin/burpsuite" && echo "✓ Burp Suite Professional found" || echo "✗ Burp Suite Professional not found"
 systemctl status nessusd &>/dev/null && echo "✓ Nessus service found" || echo "✗ Nessus service not found"
 which teamviewer &>/dev/null && echo "✓ TeamViewer found" || echo "✗ TeamViewer not found"
 ENDOFVALSCRIPT
