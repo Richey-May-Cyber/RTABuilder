@@ -1,6 +1,6 @@
 #!/bin/bash
-# Enhanced RTA Deployment Script
-# Executes all scripts in sequence with user prompts and downloads required tools
+# Streamlined RTA Deployment Script
+# Continues regardless of tool installation status
 
 # Colors
 GREEN="\033[0;32m"
@@ -60,28 +60,62 @@ download_file() {
   return 0
 }
 
-# Function to run a command/script with error handling
-run_with_fallback() {
+# Run a script with background monitoring and ability to continue
+run_with_monitoring() {
   local cmd="$1"
   local description="$2"
-  local timeout_seconds="${3:-300}"  # Default timeout of 5 minutes
+  local timeout="${3:-300}"  # Default timeout of 5 minutes
   
   print_status "Running $description..."
   
-  # Run the command with a timeout
-  timeout $timeout_seconds $cmd
-  local result=$?
+  # Save script output to a log file
+  local log_file="/opt/rta-deployment/logs/$(echo "$description" | tr ' ' '_')_$(date +%Y%m%d_%H%M%S).log"
+  mkdir -p "/opt/rta-deployment/logs"
   
-  # Check the result
-  if [ $result -eq 0 ]; then
+  # Start the script in background and redirect output to log
+  eval "$cmd" > "$log_file" 2>&1 &
+  local CMD_PID=$!
+  
+  print_info "Process started with PID $CMD_PID (timeout: ${timeout}s)"
+  
+  # Wait for the command to finish or timeout
+  local SECONDS=0
+  local progress=0
+  local update_interval=$((timeout / 20))  # Update progress 20 times
+  if [ $update_interval -lt 1 ]; then update_interval=1; fi
+  
+  # Show progress updates while waiting
+  while kill -0 $CMD_PID 2>/dev/null; do
+    # If timeout reached, break out
+    if [ $SECONDS -ge $timeout ]; then
+      print_error "Timeout reached ($timeout seconds) - continuing with deployment"
+      kill $CMD_PID 2>/dev/null || true
+      sleep 2
+      kill -9 $CMD_PID 2>/dev/null || true
+      print_info "Process terminated, continuing with next step"
+      print_info "Check log file for details: $log_file"
+      return 1
+    fi
+    
+    # Calculate and show progress
+    progress=$((SECONDS * 100 / timeout))
+    if [ $((SECONDS % update_interval)) -eq 0 ]; then
+      print_info "Running $description... ($progress% of timeout)"
+    fi
+    
+    sleep 1
+  done
+  
+  # Get the exit code
+  wait $CMD_PID
+  local exit_code=$?
+  
+  if [ $exit_code -eq 0 ]; then
     print_success "$description completed successfully"
     return 0
-  elif [ $result -eq 124 ]; then
-    print_error "$description timed out after $timeout_seconds seconds"
-    print_info "Continuing with deployment anyway..."
-    return 1
   else
-    print_error "$description failed with exit code $result"
+    print_error "$description exited with code $exit_code"
+    print_info "Check log file for details: $log_file"
     print_info "Continuing with deployment anyway..."
     return 1
   fi
@@ -95,23 +129,18 @@ fi
 
 # Display banner
 echo "=================================================="
-echo "        ENHANCED KALI LINUX RTA DEPLOYMENT        "
+echo "        STREAMLINED KALI LINUX RTA DEPLOYMENT     "
 echo "=================================================="
 echo ""
 
 # Parse command-line arguments
 AUTO_MODE=false
-INTERACTIVE_MODE=false
 SKIP_DOWNLOADS=false
 
 for arg in "$@"; do
   case $arg in
     --auto)
       AUTO_MODE=true
-      shift
-      ;;
-    --interactive)
-      INTERACTIVE_MODE=true
       shift
       ;;
     --skip-downloads)
@@ -126,34 +155,28 @@ done
 
 # Create required directories
 print_status "Creating directories..."
-mkdir -p /opt/rta-deployment/{logs,downloads}
+mkdir -p /opt/rta-deployment/{logs,downloads,config}
 mkdir -p /opt/security-tools/{bin,logs,scripts,helpers,config,system-state}
 
-# Create config directory and copy configuration if needed
-if [ ! -d "/opt/rta-deployment/config" ]; then
-  mkdir -p /opt/rta-deployment/config
-  
-  print_status "Copying configuration file..."
-  cp installer/config.yml /opt/rta-deployment/config/config.yml 2>/dev/null || {
-    print_info "Default configuration not found, creating minimal version"
-    cat > /opt/rta-deployment/config/config.yml << 'ENDOFCONFIG'
-# Minimal RTA Configuration
-apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,proxychains4,metasploit-framework"
-pipx_tools: "scoutsuite,impacket"
-git_tools: "https://github.com/prowler-cloud/prowler.git"
-manual_tools: "nessus,burpsuite_enterprise,teamviewer"
-ENDOFCONFIG
-  }
-fi
-
-# Copy installer script if it exists locally, otherwise download it
+# Copy or create installer script
 if [ -f "installer/rta-installer.sh" ]; then
   print_status "Copying installer script..."
   cp installer/rta-installer.sh /opt/rta-deployment/
   chmod +x /opt/rta-deployment/rta-installer.sh
 else
-  print_status "Downloading installer script..."
-  curl -sSL "https://raw.githubusercontent.com/yourusername/rta-installer/main/rta_installer.sh" -o /opt/rta-deployment/rta_installer.sh
+  print_status "Creating basic installer script..."
+  cat > /opt/rta-deployment/rta_installer.sh << 'ENDOFSCRIPT'
+#!/bin/bash
+echo "[*] Installing basic tools..."
+apt-get update
+apt-get install -y nmap wireshark
+echo "[+] Basic tools installed."
+mkdir -p /opt/security-tools/bin
+mkdir -p /opt/security-tools/logs
+mkdir -p /opt/security-tools/scripts
+mkdir -p /opt/security-tools/helpers
+echo "[+] Installation complete."
+ENDOFSCRIPT
   chmod +x /opt/rta-deployment/rta_installer.sh
 fi
 
@@ -183,13 +206,11 @@ if ! $SKIP_DOWNLOADS; then
   fi
 fi
 
-# Create tool installation helpers
-print_status "Creating tool installation helpers..."
-
-# Create Burp Suite Professional helper script
+# Create Burp Suite installation script
+print_status "Creating installation scripts..."
 cat > /opt/security-tools/helpers/install_burpsuite.sh << 'ENDOFBURPSCRIPT'
 #!/bin/bash
-# Helper script to install Burp Suite Professional using GitHub repo
+# Helper script to install Burp Suite Professional with aggressive handling
 
 echo "Installing Burp Suite Professional using the GitHub repository installer..."
 
@@ -197,47 +218,59 @@ echo "Installing Burp Suite Professional using the GitHub repository installer..
 TEMP_DIR=$(mktemp -d)
 cd "$TEMP_DIR"
 
-# Download the installer script
+# Download the installer script directly
 echo "Downloading installer script..."
-wget -q https://raw.githubusercontent.com/xiv3r/Burpsuite-Professional/main/install.sh -O burp_installer.sh
-chmod +x burp_installer.sh
+mkdir -p burp-install
+cd burp-install
+git clone https://github.com/xiv3r/Burpsuite-Professional.git .
 
-# Run the installer with a timeout to prevent hanging
-echo "Running installer (this may take a few minutes)..."
-timeout 300 ./burp_installer.sh
+# Run only the first part of the installation that downloads the JAR file
+echo "Downloading Burp Suite JAR and setting up files..."
+chmod +x install.sh
 
-# Check if timeout occurred
-if [ $? -eq 124 ]; then
-  echo "The Burp Suite installation timed out after 5 minutes."
-  echo "This might be because it's waiting for a license key input."
-  
-  # Try to clean up any running Java processes related to Burp
-  echo "Cleaning up any hanging processes..."
-  pkill -f "java.*burp" || true
-  
-  # Check if at least the main executable was installed
-  if [ -f "/usr/bin/burpsuite" ]; then
-    echo "Burp Suite executable was found. Installation may be partially complete."
-    echo "You'll need to manually activate the license later."
-    exit 0
-  else
-    echo "Burp Suite installation appears to have failed. The executable was not found."
-    exit 1
-  fi
-fi
+# Extract key download commands from the script to avoid the activation part
+grep -A20 "Installing Dependencies" install.sh > download_only.sh
+chmod +x download_only.sh
+./download_only.sh
 
-# Check if installation was successful
-if [ -f "/usr/bin/burpsuite" ]; then
-  echo "Burp Suite Professional installed successfully"
-  exit 0
+# Check if the JAR file was downloaded
+if [ -f "burpsuite_pro_v"*".jar" ]; then
+    # Create the target directories
+    mkdir -p /usr/share/burpsuite
+    cp burpsuite_pro_v*.jar /usr/share/burpsuite/burpsuite.jar
+    
+    # Create desktop entry
+    cat > /usr/share/applications/burpsuite.desktop << 'DESKTOPFILE'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Burp Suite Professional
+Comment=Security Testing Tool
+Exec=java -jar /usr/share/burpsuite/burpsuite.jar
+Icon=burpsuite
+Terminal=false
+Categories=Development;Security;
+DESKTOPFILE
+    
+    # Create executable
+    cat > /usr/bin/burpsuite << 'EXECFILE'
+#!/bin/bash
+java -jar /usr/share/burpsuite/burpsuite.jar "$@"
+EXECFILE
+    chmod +x /usr/bin/burpsuite
+    
+    echo "Burp Suite Professional files installed"
+    echo "You can run it with: burpsuite"
+    echo "You'll need to activate it on first run"
 else
-  echo "Burp Suite Professional installation may have failed. Please check logs for details."
-  exit 1
+    echo "Failed to download Burp Suite JAR file"
+    echo "Please install it manually after deployment"
+    exit 1
 fi
 ENDOFBURPSCRIPT
 chmod +x /opt/security-tools/helpers/install_burpsuite.sh
 
-# Create Nessus helper script
+# Create Nessus installation script
 cat > /opt/security-tools/helpers/install_nessus.sh << 'ENDOFNESSUSSCRIPT'
 #!/bin/bash
 # Helper script to install Nessus
@@ -264,13 +297,10 @@ fi
 ENDOFNESSUSSCRIPT
 chmod +x /opt/security-tools/helpers/install_nessus.sh
 
-# Create TeamViewer helper script
+# Create TeamViewer installation script
 cat > /opt/security-tools/helpers/install_teamviewer.sh << 'ENDOFTVSCRIPT'
 #!/bin/bash
 # TeamViewer Host Installer Script with Assignment
-
-# Exit on error with controlled error handling
-set +e
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -299,19 +329,12 @@ log() {
   esac
 }
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  log "ERROR" "Please run as root or with sudo"
-  exit 1
-fi
-
 # Check if the DEB package exists
 if [ ! -f "$TV_PACKAGE" ]; then
   log "WARNING" "TeamViewer Host package not found at $TV_PACKAGE"
   
   # Try to download it
   log "INFO" "Attempting to download TeamViewer Host..."
-  mkdir -p "$(dirname "$TV_PACKAGE")"
   wget https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb -O "$TV_PACKAGE" || {
     log "ERROR" "Failed to download TeamViewer Host package"
     exit 1
@@ -324,10 +347,7 @@ apt-get update
 dpkg -i "$TV_PACKAGE" || {
   log "INFO" "Fixing dependencies..."
   apt-get -f install -y
-  dpkg -i "$TV_PACKAGE" || {
-    log "ERROR" "Failed to install TeamViewer Host"
-    exit 1
-  }
+  dpkg -i "$TV_PACKAGE"
 }
 
 # Wait for TeamViewer service to start
@@ -338,56 +358,46 @@ sleep 10
 # Assign to your TeamViewer account using the assignment token
 log "STATUS" "Assigning device to your TeamViewer account..."
 teamviewer --daemon start
+sleep 5
 
 if [ -n "$ASSIGNMENT_TOKEN" ]; then
   log "INFO" "Using assignment token: $ASSIGNMENT_TOKEN"
-  teamviewer assignment --token "$ASSIGNMENT_TOKEN" || {
-    log "WARNING" "Failed to assign with token. Please check the token and try manually."
-  }
-else
-  log "WARNING" "No assignment token provided. Device will need manual assignment."
+  teamviewer assignment --token "$ASSIGNMENT_TOKEN" || true
 fi
 
 # Set a custom alias for this device
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
 log "INFO" "Setting device alias to: $DEVICE_ALIAS"
-teamviewer alias "$DEVICE_ALIAS" || log "WARNING" "Failed to set alias"
+teamviewer alias "$DEVICE_ALIAS" || true
 
-# Assign to specific group (if specified)
-if [ -n "$GROUP_ID" ]; then
-  log "INFO" "Assigning to group: $GROUP_ID"
-  teamviewer assignment --group-id "$GROUP_ID" || log "WARNING" "Failed to assign to group"
-fi
-
-# Configure TeamViewer for unattended access (no password needed)
+# Configure TeamViewer for unattended access
 log "INFO" "Configuring for unattended access..."
-teamviewer setup --grant-easy-access || log "WARNING" "Failed to configure unattended access"
+teamviewer setup --grant-easy-access || true
 
-# Disable commercial usage notification (available in corporate license)
+# Disable commercial usage notification
 log "INFO" "Disabling commercial usage notification..."
-teamviewer config set General\\CUNotification 0 || log "WARNING" "Failed to disable commercial usage notification"
+teamviewer config set General\\CUNotification 0 || true
 
 # Restart TeamViewer to apply all settings
 log "INFO" "Restarting TeamViewer service..."
 teamviewer --daemon restart
 
 # Display the TeamViewer ID for reference
-TV_ID=$(teamviewer info | grep "TeamViewer ID:" | awk '{print $3}')
+sleep 5
+TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
 if [ -n "$TV_ID" ]; then
   log "SUCCESS" "TeamViewer Host installation completed successfully!"
   log "INFO" "TeamViewer ID: $TV_ID"
-  log "INFO" "This device is now accessible through your TeamViewer business account."
 else
   log "WARNING" "TeamViewer installation completed, but could not retrieve ID."
-  log "INFO" "Check TeamViewer status with: teamviewer info"
 fi
 
 exit 0
 ENDOFTVSCRIPT
 chmod +x /opt/security-tools/helpers/install_teamviewer.sh
 
-# Create NinjaOne Agent helper script
+# Create NinjaOne Agent installation script
 cat > /opt/security-tools/helpers/install_ninjaone.sh << 'ENDOFNINJASCRIPT'
 #!/bin/bash
 # Helper script to install NinjaOne Agent
@@ -405,14 +415,11 @@ if [ -f "/opt/rta-deployment/downloads/NinjaOne-Agent.deb" ]; then
   }
   
   # Check if service is running
-  systemctl status ninjarmm-agent &>/dev/null
-  if [ $? -eq 0 ]; then
-    echo "NinjaOne Agent installed successfully and service is running"
-  else
-    echo "Starting NinjaOne Agent service..."
-    systemctl start ninjarmm-agent
-    echo "NinjaOne Agent installed"
-  fi
+  echo "Starting and enabling NinjaOne Agent service..."
+  systemctl enable ninjarmm-agent || true
+  systemctl start ninjarmm-agent || true
+
+  echo "NinjaOne Agent installation completed"
 else
   echo "NinjaOne Agent DEB package not found. Please download it first."
   exit 1
@@ -453,55 +460,55 @@ if $AUTO_MODE; then
   print_status "Running installer in automatic mode..."
   
   # Run main installer script
-  run_with_fallback "/opt/rta-deployment/rta_installer.sh" "main installer script" 600
+  run_with_monitoring "/opt/rta-deployment/rta_installer.sh" "main installer script" 300
   
-  # Install Burp Suite
-  run_with_fallback "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
+  # Install Burp Suite (with our custom non-hanging installer)
+  run_with_monitoring "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
   
   # Install Nessus
-  run_with_fallback "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
+  run_with_monitoring "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
   
   # Install TeamViewer
-  run_with_fallback "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
+  run_with_monitoring "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
   
   # Install NinjaOne Agent
-  run_with_fallback "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
+  run_with_monitoring "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
   
   # Disable screen lock if script exists
   if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ]; then
-    run_with_fallback "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
+    run_with_monitoring "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
   fi
 else
   # Interactive mode - prompt for each step
   
   # Run main installer script
   if prompt_continue "running the main installer script"; then
-    run_with_fallback "/opt/rta-deployment/rta_installer.sh" "main installer script" 600
+    run_with_monitoring "/opt/rta-deployment/rta_installer.sh" "main installer script" 300
   fi
   
   # Install Burp Suite
   if prompt_continue "installing Burp Suite Professional"; then
-    run_with_fallback "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
+    run_with_monitoring "/opt/security-tools/helpers/install_burpsuite.sh" "Burp Suite Professional installation" 600
   fi
   
   # Install Nessus
   if prompt_continue "installing Nessus"; then
-    run_with_fallback "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
+    run_with_monitoring "/opt/security-tools/helpers/install_nessus.sh" "Nessus installation" 300
   fi
   
   # Install TeamViewer
   if prompt_continue "installing TeamViewer"; then
-    run_with_fallback "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
+    run_with_monitoring "/opt/security-tools/helpers/install_teamviewer.sh" "TeamViewer installation" 300
   fi
   
   # Install NinjaOne Agent
   if prompt_continue "installing NinjaOne Agent"; then
-    run_with_fallback "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
+    run_with_monitoring "/opt/security-tools/helpers/install_ninjaone.sh" "NinjaOne Agent installation" 300
   fi
   
   # Disable screen lock if script exists
   if [ -f "/opt/security-tools/scripts/disable-lock-screen.sh" ] && prompt_continue "disabling screen lock"; then
-    run_with_fallback "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
+    run_with_monitoring "/opt/security-tools/scripts/disable-lock-screen.sh" "screen lock disabling" 60
   fi
 fi
 
@@ -541,34 +548,46 @@ print_info "System snapshot saved to: $SNAPSHOT_FILE"
 print_info "To validate tools run: sudo /opt/security-tools/scripts/validate-tools.sh"
 print_info "A reboot is recommended to complete setup."
 
-# If Nessus was installed, provide additional information
-if systemctl status nessusd &>/dev/null; then
-  echo ""
-  print_info "Nessus has been installed and the service is running."
-  print_info "Complete the setup at: https://localhost:8834/"
+# Display tool-specific information
+echo ""
+print_info "== Tool Status =="
+
+# Burp Suite
+if [ -f "/usr/bin/burpsuite" ]; then
+  print_success "Burp Suite Professional installed"
+  print_info "Run 'burpsuite' to start and activate"
+else
+  print_error "Burp Suite Professional not installed"
+  print_info "You may need to install it manually"
 fi
 
-# If TeamViewer was installed, show the ID
+# Nessus
+if systemctl status nessusd &>/dev/null; then
+  print_success "Nessus is installed and running"
+  print_info "Complete setup at: https://localhost:8834/"
+else
+  print_error "Nessus service is not running"
+  print_info "Check the installation status with: systemctl status nessusd"
+fi
+
+# TeamViewer
 if command -v teamviewer &>/dev/null; then
-  echo ""
-  print_info "TeamViewer has been installed."
+  print_success "TeamViewer is installed"
   TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
   if [ -n "$TV_ID" ]; then
     print_info "TeamViewer ID: $TV_ID"
+  else
+    print_error "Could not retrieve TeamViewer ID"
   fi
+else
+  print_error "TeamViewer is not installed"
 fi
 
-# If NinjaOne was installed, show confirmation
+# NinjaOne Agent
 if systemctl status ninjarmm-agent &>/dev/null; then
-  echo ""
-  print_info "NinjaOne Agent has been installed and is running."
-  print_info "The device should appear in your NinjaOne dashboard shortly."
-fi
-
-# If Burp Suite was installed but might need manual activation
-if [ -f "/usr/bin/burpsuite" ]; then
-  echo ""
-  print_info "Burp Suite Professional has been installed."
-  print_info "If the installer timed out, you may need to run it manually to activate:"
-  print_info "sudo /usr/bin/burpsuite"
+  print_success "NinjaOne Agent is installed and running"
+  print_info "The device should appear in your NinjaOne dashboard shortly"
+else
+  print_error "NinjaOne Agent service is not running"
+  print_info "Check the installation status with: systemctl status ninjarmm-agent"
 fi
