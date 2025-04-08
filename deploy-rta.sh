@@ -300,7 +300,7 @@ chmod +x /opt/security-tools/helpers/install_nessus.sh
 # Create TeamViewer installation script
 cat > /opt/security-tools/helpers/install_teamviewer.sh << 'ENDOFTVSCRIPT'
 #!/bin/bash
-# TeamViewer Host Installer Script with Assignment
+# TeamViewer Host Installer Script with PolicyKit1 fix for Kali Linux
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -341,23 +341,69 @@ if [ ! -f "$TV_PACKAGE" ]; then
   }
 fi
 
+# Check if we're on Kali Linux and need the PolicyKit1 fix
+if grep -q "Kali" /etc/os-release; then
+  log "INFO" "Kali Linux detected, applying PolicyKit1 workaround..."
+  
+  # Install equivs if not present
+  if ! command -v equivs-control &>/dev/null; then
+    log "INFO" "Installing equivs package..."
+    apt-get update
+    apt-get install -y equivs
+  fi
+  
+  # Create directory for the temporary files
+  TEMP_DIR=$(mktemp -d)
+  cd "$TEMP_DIR"
+  
+  # Generate template for policykit-1
+  log "INFO" "Generating policykit-1 template..."
+  equivs-control policykit-1
+  
+  # Edit the template
+  log "INFO" "Creating policykit-1 dummy package..."
+  # Get polkitd version if available
+  POLKIT_VERSION=$(dpkg -l | grep polkitd | awk '{print $3}' || echo "124-3")
+  
+  # Edit template
+  sed -i "s/^#Package: .*/Package: policykit-1/" policykit-1
+  sed -i "s/^#Version: .*/Version: $POLKIT_VERSION/" policykit-1
+  sed -i "s/^#Depends: .*/Depends: pkexec, polkitd/" policykit-1
+  sed -i "/^Description:/,$ s/^.*$/Description: Dummy package for TeamViewer dependency/" policykit-1
+  
+  # Build package
+  log "INFO" "Building policykit-1 dummy package..."
+  equivs-build policykit-1
+  
+  # Install package
+  log "INFO" "Installing policykit-1 dummy package..."
+  apt-get install -y ./policykit-1_*_all.deb
+  
+  # Cleanup
+  cd -
+  rm -rf "$TEMP_DIR"
+fi
+
 # Install TeamViewer
 log "STATUS" "Installing TeamViewer Host..."
 apt-get update
 dpkg -i "$TV_PACKAGE" || {
   log "INFO" "Fixing dependencies..."
   apt-get -f install -y
-  dpkg -i "$TV_PACKAGE"
+  dpkg -i "$TV_PACKAGE" || {
+    log "ERROR" "Failed to install TeamViewer Host"
+    exit 1
+  }
 }
 
 # Wait for TeamViewer service to start
 log "INFO" "Waiting for TeamViewer service to initialize..."
-systemctl start teamviewerd
+systemctl start teamviewerd || true
 sleep 10
 
 # Assign to your TeamViewer account using the assignment token
 log "STATUS" "Assigning device to your TeamViewer account..."
-teamviewer --daemon start
+teamviewer --daemon start || true
 sleep 5
 
 if [ -n "$ASSIGNMENT_TOKEN" ]; then
@@ -381,7 +427,7 @@ teamviewer config set General\\CUNotification 0 || true
 
 # Restart TeamViewer to apply all settings
 log "INFO" "Restarting TeamViewer service..."
-teamviewer --daemon restart
+teamviewer --daemon restart || true
 
 # Display the TeamViewer ID for reference
 sleep 5
