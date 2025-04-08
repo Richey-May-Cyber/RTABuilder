@@ -1,125 +1,103 @@
-cat > ~/RTABuilder/deploy-rta.sh << 'EOF'
 #!/bin/bash
-# =================================================================
-# Enhanced Kali Linux RTA Deployment Script for GitHub Deployment
-# =================================================================
+# Simple RTA Deployment Script
 
-# Exit on error for critical operations
-set -e
+# Colors
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+BLUE="\033[0;34m"
+NC="\033[0m" # No Color
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
-
-# Directories and files
-WORK_DIR="/opt/rta-deployment"
-TOOLS_DIR="/opt/security-tools"
-LOG_DIR="$WORK_DIR/logs"
-CONFIG_DIR="$WORK_DIR/config"
-CURRENT_DIR="$(pwd)"
-
-# Logging and output functions
-print_status() { echo -e "${YELLOW}[*] $1${NC}"; }
-print_success() { echo -e "${GREEN}[+] $1${NC}"; }
-print_error() { echo -e "${RED}[-] $1${NC}"; }
-print_info() { echo -e "${BLUE}[i] $1${NC}"; }
-print_debug() { echo -e "${CYAN}[D] $1${NC}"; }
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-    print_error "This script must be run as root"
-    echo -e "\nUsage: sudo $0"
-    exit 1
-fi
-
-print_banner() {
-    echo -e "\n${BOLD}${BLUE}==================================================================${NC}"
-    echo -e "${BOLD}${BLUE}                 KALI LINUX RTA DEPLOYMENT                 ${NC}"
-    echo -e "${BOLD}${BLUE}==================================================================${NC}\n"
+# Functions
+print_status() { 
+  echo -e "${YELLOW}[*] $1${NC}"
 }
 
+print_success() { 
+  echo -e "${GREEN}[+] $1${NC}"
+}
+
+print_error() { 
+  echo -e "${RED}[-] $1${NC}"
+}
+
+print_info() { 
+  echo -e "${BLUE}[i] $1${NC}"
+}
+
+# Check root
+if [ "$EUID" -ne 0 ]; then
+  print_error "Please run as root"
+  exit 1
+fi
+
 # Display banner
-print_banner
+echo "=================================================="
+echo "          KALI LINUX RTA DEPLOYMENT              "
+echo "=================================================="
+echo ""
 
-# Create necessary directories
+# Create directories
 print_status "Creating directories..."
-mkdir -p "$WORK_DIR" "$TOOLS_DIR" "$LOG_DIR" "$CONFIG_DIR" "$TOOLS_DIR/scripts" "$TOOLS_DIR/logs" "$TOOLS_DIR/system-state"
-
-# Create a placeholder installer
-print_status "Creating placeholder installer..."
-cat > "$WORK_DIR/rta_installer.sh" << 'EOFINSTALLER'
-#!/bin/bash
-echo "This is a placeholder installer script."
-echo "Creating basic directory structure..."
+mkdir -p /opt/rta-deployment/logs
 mkdir -p /opt/security-tools/bin
 mkdir -p /opt/security-tools/logs
 mkdir -p /opt/security-tools/scripts
 mkdir -p /opt/security-tools/helpers
-mkdir -p /opt/security-tools/desktop
+mkdir -p /opt/security-tools/system-state
 
-echo "Tools would be installed here."
-exit 0
-EOFINSTALLER
-chmod +x "$WORK_DIR/rta_installer.sh"
-
-# Create a placeholder validation script
-print_status "Creating placeholder validation script..."
-mkdir -p "$TOOLS_DIR/scripts"
-cat > "$TOOLS_DIR/scripts/validate-tools.sh" << 'EOFVALIDATE'
+# Create basic installer
+print_status "Creating installer script..."
+cat > /opt/rta-deployment/rta_installer.sh << 'ENDOFSCRIPT'
 #!/bin/bash
-echo "This is a placeholder validation script."
-echo "It would validate the installed tools."
-exit 0
-EOFVALIDATE
-chmod +x "$TOOLS_DIR/scripts/validate-tools.sh"
+echo "[*] Installing basic tools..."
+apt-get update
+apt-get install -y nmap wireshark
+echo "[+] Basic tools installed."
+mkdir -p /opt/security-tools/bin
+mkdir -p /opt/security-tools/logs
+mkdir -p /opt/security-tools/scripts
+mkdir -p /opt/security-tools/helpers
+echo "[+] Installation complete."
+ENDOFSCRIPT
+chmod +x /opt/rta-deployment/rta_installer.sh
 
-# Create system snapshot
+# Create validation script
+print_status "Creating validation script..."
+cat > /opt/security-tools/scripts/validate-tools.sh << 'ENDOFVALSCRIPT'
+#!/bin/bash
+echo "Validating tools..."
+which nmap > /dev/null && echo "✓ nmap found" || echo "✗ nmap not found"
+which wireshark > /dev/null && echo "✓ wireshark found" || echo "✗ wireshark not found"
+ENDOFVALSCRIPT
+chmod +x /opt/security-tools/scripts/validate-tools.sh
+
+# Run installer 
+print_status "Running installer..."
+/opt/rta-deployment/rta_installer.sh
+
+# Create snapshot
 print_status "Creating system snapshot..."
-SNAPSHOT_FILE="$TOOLS_DIR/system-state/system-snapshot-$(date +%Y%m%d-%H%M%S).txt"
+SNAPSHOT_FILE="/opt/security-tools/system-state/snapshot-$(date +%Y%m%d-%H%M%S).txt"
 {
-    echo "==== RTA SYSTEM SNAPSHOT ===="
-    echo "Date: $(date)"
-    echo "Hostname: $(hostname)"
-    echo "Kernel: $(uname -r)"
-    echo "Kali Version: $(cat /etc/os-release | grep VERSION= | cut -d'"' -f2 2>/dev/null || echo 'Unknown')"
-    echo ""
-    
-    echo "==== DISK USAGE ===="
-    df -h
-    echo ""
-    
-    echo "==== MEMORY USAGE ===="
-    free -h
-    echo ""
+  echo "=== SYSTEM SNAPSHOT ==="
+  echo "Date: $(date)"
+  echo "Hostname: $(hostname)"
+  echo "Kernel: $(uname -r)"
+  echo ""
+  echo "=== DISK SPACE ==="
+  df -h
 } > "$SNAPSHOT_FILE"
 
-print_success "System snapshot created: $SNAPSHOT_FILE"
+print_success "System snapshot saved: $SNAPSHOT_FILE"
 
 # Display completion message
-cat << EOF
-
-${GREEN}==================================================================${NC}
-${GREEN}                  RTA DEPLOYMENT COMPLETED!                       ${NC}
-${GREEN}==================================================================${NC}
-
-${BLUE}Installed tools can be found at:${NC} $TOOLS_DIR/
-${BLUE}Installation logs are available at:${NC} $TOOLS_DIR/logs/
-${BLUE}System snapshot is saved at:${NC} $SNAPSHOT_FILE
-
-${YELLOW}Next steps:${NC}
-1. Validate the installation by running:
-   ${CYAN}sudo $TOOLS_DIR/scripts/validate-tools.sh${NC}
-2. Install any remaining manual tools using the helper scripts:
-   ${CYAN}ls $TOOLS_DIR/helpers/${NC}
-3. Configure any tool-specific settings
-
-${BLUE}Thank you for using the RTA Deployment Script!${NC}
-EOF
-
-print_info "Reboot recommended to apply changes."
-EOF
+echo ""
+echo -e "${GREEN}=================================================${NC}"
+echo -e "${GREEN}          RTA DEPLOYMENT COMPLETED!              ${NC}"
+echo -e "${GREEN}=================================================${NC}"
+echo ""
+print_info "Installed tools can be found at: /opt/security-tools/"
+print_info "System snapshot saved to: $SNAPSHOT_FILE"
+print_info "To validate tools run: sudo /opt/security-tools/scripts/validate-tools.sh"
+print_info "A reboot is recommended to complete setup."
