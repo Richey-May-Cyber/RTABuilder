@@ -29,13 +29,13 @@ MAIN_LOG="$LOG_DIR/deployment_$(date +%Y%m%d_%H%M%S).log"
 SUMMARY_FILE="$LOG_DIR/deployment_summary_$(date +%Y%m%d_%H%M%S).txt"
 PARALLEL_JOBS=$(grep -c processor /proc/cpuinfo)
 # Limit parallel jobs to avoid resource exhaustion
-if [ $PARALLEL_JOBS -gt 6 ]; then
-  PARALLEL_JOBS=6
+if [ $PARALLEL_JOBS -gt 10 ]; then
+  PARALLEL_JOBS=10
 fi
 
 # Timeout settings (in seconds)
-DEFAULT_TIMEOUT=600  # 10 minutes
-LONG_TIMEOUT=1200    # 20 minutes
+DEFAULT_TIMEOUT=60  # 1 minutes
+LONG_TIMEOUT=600    # 10 minutes
 SHORT_TIMEOUT=300    # 5 minutes
 
 # Colors
