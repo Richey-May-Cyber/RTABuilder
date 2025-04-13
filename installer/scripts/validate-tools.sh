@@ -1,11 +1,8 @@
 #!/bin/bash
 # =================================================================
-# RTA Tools Validation Script
+# RTA Tools Validation Script 2.0
 # =================================================================
-# Description: Validates that security tools are correctly installed and accessible
-# Author: Security Professional
-# Version: 1.0
-# Usage: sudo ./validate-tools.sh [OPTIONS]
+# Comprehensive validation of security tools with detailed reporting
 # =================================================================
 
 # Colors for output
@@ -22,6 +19,7 @@ TOOLS_DIR="/opt/security-tools"
 LOG_DIR="$TOOLS_DIR/logs"
 VALIDATION_LOG="$LOG_DIR/tool_validation_$(date +%Y%m%d_%H%M%S).log"
 VALIDATION_REPORT="$LOG_DIR/tool_validation_report_$(date +%Y%m%d_%H%M%S).txt"
+CONFIG_FILE="/opt/rta-deployment/config/config.yml"
 
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
@@ -60,6 +58,8 @@ OPTIONS:
   --pipx-only         Only check pipx-installed tools
   --git-only          Only check git-installed tools
   --verbose           Show more detailed output
+  --fix-failed        Attempt to reinstall failed tools
+  --export-html       Export results as HTML report
   --help              Display this help message and exit
 EOF
 }
@@ -70,6 +70,8 @@ APT_ONLY=false
 PIPX_ONLY=false
 GIT_ONLY=false
 VERBOSE=false
+FIX_FAILED=false
+EXPORT_HTML=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,6 +93,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --verbose)
             VERBOSE=true
+            shift
+            ;;
+        --fix-failed)
+            FIX_FAILED=true
+            shift
+            ;;
+        --export-html)
+            EXPORT_HTML=true
             shift
             ;;
         --help)
@@ -120,6 +130,17 @@ warning_count=0
 total_tools=0
 start_time=$(date +%s)
 
+# Read tool lists from config file if it exists
+if [ -f "$CONFIG_FILE" ]; then
+    echo -e "${BLUE}[i] Reading tool configuration from $CONFIG_FILE${NC}"
+    APT_TOOLS_LIST=$(grep -E "^apt_tools:" "$CONFIG_FILE" | cut -d'"' -f2)
+    PIPX_TOOLS_LIST=$(grep -E "^pipx_tools:" "$CONFIG_FILE" | cut -d'"' -f2)
+    GIT_TOOLS_LIST=$(grep -E "^git_tools:" "$CONFIG_FILE" | cut -d'"' -f2)
+    MANUAL_TOOLS_LIST=$(grep -E "^manual_tools:" "$CONFIG_FILE" | cut -d'"' -f2)
+else
+    echo -e "${YELLOW}[!] Configuration file not found, using default tool list${NC}"
+fi
+
 # Categories of tools to check
 declare -A APT_TOOLS=(
     ["nmap"]="nmap -V | grep 'Nmap version'"
@@ -145,6 +166,7 @@ declare -A APT_TOOLS=(
     ["foremost"]="foremost -V | grep 'foremost version'"
     ["exiftool"]="exiftool -ver | grep '^[0-9]'"
     ["steghide"]="steghide --version | grep 'steghide '"
+    ["terminator"]="terminator --version | grep 'terminator'"
 )
 
 declare -A PIPX_TOOLS=(
@@ -189,6 +211,7 @@ declare -A ESSENTIAL_TOOLS=(
     ["impacket"]="impacket-samrdump --help 2>&1 | grep 'impacket v'"
     ["proxychains"]="proxychains -h 2>&1 | grep 'ProxyChains'"
     ["bettercap"]="bettercap -v | grep 'bettercap v'"
+    ["terminator"]="terminator --version | grep 'terminator'"
 )
 
 declare -A MANUAL_TOOLS=(
@@ -196,7 +219,29 @@ declare -A MANUAL_TOOLS=(
     ["bfg"]="bfg --version 2>&1 | grep -i 'BFG'"
     ["nessus"]="systemctl status nessusd 2>&1 | grep 'nessusd'"
     ["burpsuite"]="burpsuite --help 2>&1 | grep -i 'Burp Suite'"
+    ["ninjaone"]="systemctl status ninjarmm-agent 2>&1 | grep 'ninjarmm-agent'"
 )
+
+# Add any tools from config file that aren't already in our arrays
+if [ -n "$APT_TOOLS_LIST" ]; then
+    IFS=',' read -ra APT_ARRAY <<< "$APT_TOOLS_LIST"
+    for tool in "${APT_ARRAY[@]}"; do
+        tool=$(echo "$tool" | tr -d ' ')
+        if [[ -n "$tool" ]] && [[ -z "${APT_TOOLS[$tool]}" ]]; then
+            APT_TOOLS["$tool"]="which $tool 2>&1 | grep -v 'no $tool'"
+        fi
+    done
+fi
+
+if [ -n "$PIPX_TOOLS_LIST" ]; then
+    IFS=',' read -ra PIPX_ARRAY <<< "$PIPX_TOOLS_LIST"
+    for tool in "${PIPX_ARRAY[@]}"; do
+        tool=$(echo "$tool" | tr -d ' ')
+        if [[ -n "$tool" ]] && [[ -z "${PIPX_TOOLS[$tool]}" ]]; then
+            PIPX_TOOLS["$tool"]="which $tool 2>&1 | grep -v 'no $tool'"
+        fi
+    done
+fi
 
 # Function to validate a tool
 validate_tool() {
@@ -206,7 +251,9 @@ validate_tool() {
     
     ((total_tools++))
     
-    echo -e "${YELLOW}[*] Checking $tool_name...${NC}"
+    if $VERBOSE; then
+        echo -e "${YELLOW}[*] Checking $tool_name...${NC}"
+    fi
     echo "[CHECKING] $tool_name" >> "$VALIDATION_LOG"
     
     # Try to execute the validation command
@@ -246,6 +293,38 @@ validate_tool() {
             VALIDATION_RESULTS["$tool_name"]="FAILED"
             VALIDATION_DETAILS["$tool_name"]="Not installed or not in PATH"
             ((failure_count++))
+            
+            # If --fix-failed is enabled, attempt to reinstall
+            if $FIX_FAILED; then
+                echo -e "${YELLOW}[!] Attempting to reinstall $tool_name...${NC}"
+                
+                if [[ "$category" == "APT_TOOLS" ]]; then
+                    apt-get install -y "$tool_name" >/dev/null 2>&1
+                    if eval "$validation_command" &>/dev/null; then
+                        echo -e "${GREEN}[+] Successfully reinstalled $tool_name${NC}"
+                        VALIDATION_RESULTS["$tool_name"]="FIXED"
+                        VALIDATION_DETAILS["$tool_name"]="Reinstalled successfully"
+                        ((success_count++))
+                        ((failure_count--))
+                        return 0
+                    else
+                        echo -e "${RED}[-] Failed to reinstall $tool_name${NC}"
+                    fi
+                elif [[ "$category" == "PIPX_TOOLS" ]]; then
+                    pipx install "$tool_name" >/dev/null 2>&1
+                    if eval "$validation_command" &>/dev/null; then
+                        echo -e "${GREEN}[+] Successfully reinstalled $tool_name with pipx${NC}"
+                        VALIDATION_RESULTS["$tool_name"]="FIXED"
+                        VALIDATION_DETAILS["$tool_name"]="Reinstalled successfully with pipx"
+                        ((success_count++))
+                        ((failure_count--))
+                        return 0
+                    else
+                        echo -e "${RED}[-] Failed to reinstall $tool_name with pipx${NC}"
+                    fi
+                fi
+            fi
+            
             return 2
         fi
     fi
@@ -263,12 +342,15 @@ add_report_section() {
     
     # Sort tools by status: SUCCESS, WARNING, FAILED
     local success_list=""
+    local fixed_list=""
     local warning_list=""
     local failed_list=""
     
     for tool in "${!tools[@]}"; do
         if [[ "${VALIDATION_RESULTS[$tool]}" == "SUCCESS" ]]; then
             success_list+="  ✓ $tool: ${VALIDATION_DETAILS[$tool]}\n"
+        elif [[ "${VALIDATION_RESULTS[$tool]}" == "FIXED" ]]; then
+            fixed_list+="  ✓ $tool: ${VALIDATION_DETAILS[$tool]}\n"
         elif [[ "${VALIDATION_RESULTS[$tool]}" == "WARNING" ]]; then
             warning_list+="  ⚠ $tool: ${VALIDATION_DETAILS[$tool]}\n"
         elif [[ "${VALIDATION_RESULTS[$tool]}" == "FAILED" ]]; then
@@ -282,6 +364,11 @@ add_report_section() {
         echo -e "$success_list" >> "$VALIDATION_REPORT"
     fi
     
+    if [ -n "$fixed_list" ]; then
+        echo "FIXED DURING VALIDATION:" >> "$VALIDATION_REPORT"
+        echo -e "$fixed_list" >> "$VALIDATION_REPORT"
+    fi
+    
     if [ -n "$warning_list" ]; then
         echo "WARNINGS:" >> "$VALIDATION_REPORT"
         echo -e "$warning_list" >> "$VALIDATION_REPORT"
@@ -293,6 +380,209 @@ add_report_section() {
     fi
     
     echo "" >> "$VALIDATION_REPORT"
+}
+
+# Function to export HTML report
+export_html_report() {
+    local html_file="${VALIDATION_REPORT%.txt}.html"
+    
+    cat > "$html_file" << EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTA Tools Validation Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .header {
+            background-color: #34495e;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .summary {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+        .summary-card {
+            flex: 1;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 0 10px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .success { background-color: #e6f7e9; border-left: 4px solid #2ecc71; }
+        .warning { background-color: #fef8e7; border-left: 4px solid #f1c40f; }
+        .error { background-color: #feecec; border-left: 4px solid #e74c3c; }
+        .category {
+            margin-bottom: 30px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .category-header {
+            background-color: #f9f9f9;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            font-weight: bold;
+        }
+        .tool-list {
+            padding: 0;
+            margin: 0;
+            list-style-type: none;
+        }
+        .tool-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .tool-item:last-child {
+            border-bottom: none;
+        }
+        .tool-success { color: #2ecc71; }
+        .tool-warning { color: #f1c40f; }
+        .tool-error { color: #e74c3c; }
+        .tool-fixed { color: #3498db; }
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #7f8c8d;
+        }
+        @media print {
+            body { font-size: 12pt; }
+            .category { page-break-inside: avoid; }
+            .header { background-color: #f9f9f9; color: #333; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RTA Tools Validation Report</h1>
+        <p>Generated on $(date)</p>
+        <p>Host: $(hostname) - Kali $(cat /etc/os-release | grep VERSION= | cut -d'"' -f2 2>/dev/null || echo "Linux")</p>
+    </div>
+
+    <div class="summary">
+        <div class="summary-card success">
+            <h3>Success</h3>
+            <p style="font-size: 24px;"><strong>$success_count</strong></p>
+            <p>Tools successfully validated</p>
+        </div>
+        <div class="summary-card warning">
+            <h3>Warnings</h3>
+            <p style="font-size: 24px;"><strong>$warning_count</strong></p>
+            <p>Tools with warnings</p>
+        </div>
+        <div class="summary-card error">
+            <h3>Failed</h3>
+            <p style="font-size: 24px;"><strong>$failure_count</strong></p>
+            <p>Tools failed validation</p>
+        </div>
+    </div>
+EOF
+
+    # Add category sections
+    for category in APT_TOOLS PIPX_TOOLS GIT_TOOLS MANUAL_TOOLS; do
+        # Check if we should include this category
+        if $ESSENTIAL_ONLY && [ "$category" != "ESSENTIAL_TOOLS" ]; then
+            continue
+        fi
+        if $APT_ONLY && [ "$category" != "APT_TOOLS" ]; then
+            continue
+        fi
+        if $PIPX_ONLY && [ "$category" != "PIPX_TOOLS" ]; then
+            continue
+        fi
+        if $GIT_ONLY && [ "$category" != "GIT_TOOLS" ]; then
+            continue
+        fi
+        
+        # Get pretty name for category
+        case "$category" in
+            "APT_TOOLS") pretty_name="APT-Installed Tools" ;;
+            "PIPX_TOOLS") pretty_name="PIPX-Installed Tools" ;;
+            "GIT_TOOLS") pretty_name="Git-Installed Tools" ;;
+            "MANUAL_TOOLS") pretty_name="Manually Installed Tools" ;;
+            "ESSENTIAL_TOOLS") pretty_name="Essential Tools" ;;
+            *) pretty_name="$category" ;;
+        esac
+        
+        # Start category section
+        cat >> "$html_file" << EOF
+    <div class="category">
+        <div class="category-header">$pretty_name</div>
+        <ul class="tool-list">
+EOF
+        
+        # Add tools in the category
+        declare -n tools_array="$category"
+        for tool in "${!tools_array[@]}"; do
+            status="${VALIDATION_RESULTS[$tool]}"
+            details="${VALIDATION_DETAILS[$tool]}"
+            
+            case "$status" in
+                "SUCCESS") 
+                    icon="✓"
+                    class="tool-success"
+                    ;;
+                "FIXED") 
+                    icon="✓"
+                    class="tool-fixed"
+                    ;;
+                "WARNING") 
+                    icon="⚠"
+                    class="tool-warning"
+                    ;;
+                "FAILED") 
+                    icon="✗"
+                    class="tool-error"
+                    ;;
+                *) 
+                    icon="?"
+                    class=""
+                    ;;
+            esac
+            
+            cat >> "$html_file" << EOF
+            <li class="tool-item">
+                <span class="$class">$icon $tool:</span> $details
+            </li>
+EOF
+        done
+        
+        # End category section
+        cat >> "$html_file" << EOF
+        </ul>
+    </div>
+EOF
+    done
+    
+    # Add footer and close HTML
+    cat >> "$html_file" << EOF
+    <div class="footer">
+        <p>Validation time: $minutes minutes and $seconds seconds</p>
+        <p>RTA Tools Validation System v2.0</p>
+    </div>
+</body>
+</html>
+EOF
+
+    echo -e "${BLUE}[i] HTML report exported to: ${YELLOW}$html_file${NC}"
 }
 
 # Determine which tools to validate
@@ -320,9 +610,22 @@ for category in "${tools_to_check[@]}"; do
     # Get the associative array by name using indirect reference
     declare -n tools_array="$category"
     
+    # Count tools in this category for progress display
+    local category_total="${#tools_array[@]}"
+    local category_current=0
+    
     for tool in "${!tools_array[@]}"; do
+        ((category_current++))
+        if [ $category_total -gt 10 ] && ! $VERBOSE; then
+            # Show progress for large categories
+            printf "Progress: [%3d/%3d] %3d%%\r" $category_current $category_total $((category_current * 100 / category_total))
+        fi
         validate_tool "$tool" "${tools_array[$tool]}" "$category"
     done
+    
+    if [ $category_total -gt 10 ] && ! $VERBOSE; then
+        printf "%-60s\r" " " # Clear the progress line
+    fi
 done
 
 # Calculate elapsed time
@@ -367,13 +670,18 @@ if [ $failure_count -gt 0 ]; then
 RECOMMENDATION FOR FAILED TOOLS:
 -------------------------------
 For failed tools, try reinstalling with:
-  sudo /opt/security-tools/rta_installer.sh --force-reinstall
+  sudo /opt/rta-deployment/deploy-rta.sh --reinstall-failed
 
 For manual tools, use the helper scripts:
   cd /opt/security-tools/helpers
   sudo ./install_<tool_name>.sh
 
 EOF
+fi
+
+# Export HTML report if requested
+if $EXPORT_HTML; then
+    export_html_report
 fi
 
 # Print summary
@@ -388,7 +696,7 @@ echo -e "${BLUE}[i] Results saved to:${NC} ${VALIDATION_REPORT}"
 # Provide recommendations for failed tools
 if [ $failure_count -gt 0 ]; then
     echo -e "\n${YELLOW}[!] Recommendations for failed tools:${NC}"
-    echo -e "  - For APT/PIPX tools: ${CYAN}sudo /opt/security-tools/rta_installer.sh --force-reinstall${NC}"
+    echo -e "  - For APT/PIPX tools: ${CYAN}sudo /opt/rta-deployment/deploy-rta.sh --reinstall-failed${NC}"
     echo -e "  - For manual tools: ${CYAN}cd /opt/security-tools/helpers && sudo ./install_<tool_name>.sh${NC}"
 fi
 
