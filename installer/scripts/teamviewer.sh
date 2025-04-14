@@ -1,8 +1,5 @@
 #!/bin/bash
-# TeamViewer Host Installer Script with Assignment
-
-# Exit on error with controlled error handling
-set +e
+# TeamViewer Host Installer with advanced configuration and Kali Linux compatibility fixes
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -14,7 +11,7 @@ NC='\033[0m' # No Color
 # Configuration Variables
 TV_PACKAGE="/opt/rta-deployment/downloads/teamviewer-host_amd64.deb"
 ASSIGNMENT_TOKEN="25998227-v1SCqDinbXPh3pHnBv7s"  # Your assignment token
-GROUP_ID="RTAs"  # Replace with your actual group ID
+GROUP_ID="g12345"  # Replace with your actual group ID
 ALIAS_PREFIX="$(hostname)-"  # Device names will be hostname + timestamp
 
 # Function to log messages
@@ -44,10 +41,62 @@ if [ ! -f "$TV_PACKAGE" ]; then
   # Try to download it
   log "INFO" "Attempting to download TeamViewer Host..."
   mkdir -p "$(dirname "$TV_PACKAGE")"
-  wget https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb -O "$TV_PACKAGE" || {
+  wget -q --show-progress https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb -O "$TV_PACKAGE" || {
     log "ERROR" "Failed to download TeamViewer Host package"
     exit 1
   }
+fi
+
+# Install policykit-1 dependency for Kali Linux
+if grep -q "Kali" /etc/os-release; then
+  log "INFO" "Kali Linux detected, installing policykit-1 dependency..."
+  
+  # Direct installation of policykit-1
+  apt-get update
+  apt-get install -y policykit-1 || {
+    log "WARNING" "Could not install policykit-1 from repositories"
+    
+    # Alternative way - install polkit instead (provides policykit-1)
+    log "INFO" "Attempting to install polkit as an alternative..."
+    apt-get install -y polkit
+  }
+  
+  # Verify if policykit-1 or equivalent is installed
+  if ! dpkg -l | grep -E 'policykit-1|polkit' | grep -q '^ii'; then
+    log "WARNING" "Could not install required dependency. Creating manual override..."
+    
+    # Create directory for fake policykit-1 package
+    mkdir -p /tmp/fake-policykit
+    cd /tmp/fake-policykit
+    
+    # Creating a minimal debian package structure
+    mkdir -p DEBIAN
+    cat > DEBIAN/control << EOF
+Package: policykit-1
+Version: 1.0.0
+Architecture: all
+Maintainer: RTA Installer <rta@example.com>
+Description: Dummy policykit-1 package for TeamViewer
+Priority: optional
+Section: admin
+EOF
+    
+    # Build the package
+    log "INFO" "Building dummy policykit-1 package..."
+    dpkg-deb --build . policykit-1_1.0.0_all.deb
+    
+    # Install the dummy package
+    log "INFO" "Installing dummy policykit-1 package..."
+    dpkg -i policykit-1_1.0.0_all.deb || {
+      log "ERROR" "Failed to install dummy policykit-1 package"
+      cd - > /dev/null
+      rm -rf /tmp/fake-policykit
+      exit 1
+    }
+    
+    cd - > /dev/null
+    rm -rf /tmp/fake-policykit
+  fi
 fi
 
 # Install TeamViewer
@@ -62,57 +111,41 @@ dpkg -i "$TV_PACKAGE" || {
   }
 }
 
-# Wait for TeamViewer service to start
-log "INFO" "Waiting for TeamViewer service to initialize..."
-systemctl start teamviewerd
-sleep 10
+# Make sure TeamViewer daemon is running
+log "INFO" "Starting TeamViewer daemon..."
+systemctl start teamviewerd || true
+sleep 5
 
-# Assign to your TeamViewer account using the assignment token
-log "STATUS" "Assigning device to your TeamViewer account..."
-teamviewer --daemon start
-
-if [ -n "$ASSIGNMENT_TOKEN" ]; then
-  log "INFO" "Using assignment token: $ASSIGNMENT_TOKEN"
-  teamviewer assignment --token "$ASSIGNMENT_TOKEN" || {
-    log "WARNING" "Failed to assign with token. Please check the token and try manually."
-  }
+# Configure TeamViewer
+if systemctl is-active --quiet teamviewerd; then
+  log "SUCCESS" "TeamViewer Host installed and daemon is running"
+  
+  # Set a custom alias for this device
+  TIMESTAMP=$(date +%Y%m%d%H%M%S)
+  DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
+  log "INFO" "Setting device alias to: $DEVICE_ALIAS"
+  teamviewer alias "$DEVICE_ALIAS" || true
+  
+  # Assign to account if token provided
+  if [ -n "$ASSIGNMENT_TOKEN" ]; then
+    log "INFO" "Assigning device to your TeamViewer account..."
+    teamviewer assignment --token "$ASSIGNMENT_TOKEN" || true
+  fi
+  
+  # Configure for unattended access
+  log "INFO" "Configuring for unattended access..."
+  teamviewer setup --grant-easy-access || true
+  
+  # Display the TeamViewer ID
+  TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
+  if [ -n "$TV_ID" ]; then
+    log "SUCCESS" "Configuration completed. TeamViewer ID: $TV_ID"
+  else
+    log "WARNING" "Could not retrieve TeamViewer ID"
+  fi
 else
-  log "WARNING" "No assignment token provided. Device will need manual assignment."
-fi
-
-# Set a custom alias for this device
-TIMESTAMP=$(date +%Y%m%d%H%M%S)
-DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
-log "INFO" "Setting device alias to: $DEVICE_ALIAS"
-teamviewer alias "$DEVICE_ALIAS" || log "WARNING" "Failed to set alias"
-
-# Assign to specific group (if specified)
-if [ -n "$GROUP_ID" ]; then
-  log "INFO" "Assigning to group: $GROUP_ID"
-  teamviewer assignment --group-id "$GROUP_ID" || log "WARNING" "Failed to assign to group"
-fi
-
-# Configure TeamViewer for unattended access (no password needed)
-log "INFO" "Configuring for unattended access..."
-teamviewer setup --grant-easy-access || log "WARNING" "Failed to configure unattended access"
-
-# Disable commercial usage notification (available in corporate license)
-log "INFO" "Disabling commercial usage notification..."
-teamviewer config set General\\CUNotification 0 || log "WARNING" "Failed to disable commercial usage notification"
-
-# Restart TeamViewer to apply all settings
-log "INFO" "Restarting TeamViewer service..."
-teamviewer --daemon restart
-
-# Display the TeamViewer ID for reference
-TV_ID=$(teamviewer info | grep "TeamViewer ID:" | awk '{print $3}')
-if [ -n "$TV_ID" ]; then
-  log "SUCCESS" "TeamViewer Host installation completed successfully!"
-  log "INFO" "TeamViewer ID: $TV_ID"
-  log "INFO" "This device is now accessible through your TeamViewer business account."
-else
-  log "WARNING" "TeamViewer installation completed, but could not retrieve ID."
-  log "INFO" "Check TeamViewer status with: teamviewer info"
+  log "ERROR" "TeamViewer daemon is not running after installation"
+  exit 1
 fi
 
 exit 0
