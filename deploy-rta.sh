@@ -1,6 +1,6 @@
 #!/bin/bash
 # ================================================================
-# Enhanced RTA Deployment Script v2.0
+# Enhanced RTA Deployment Script v2.1
 # ================================================================
 # A robust, fully-automated deployment system for Kali Linux RTAs
 # with comprehensive error handling and recovery
@@ -14,7 +14,7 @@
 # 4 - User abort
 
 # Global configuration
-VERSION="2.0"
+VERSION="2.1"
 DEPLOY_DIR="/opt/rta-deployment"
 TOOLS_DIR="/opt/security-tools"
 LOG_DIR="$DEPLOY_DIR/logs"
@@ -36,7 +36,7 @@ fi
 # Timeout settings (in seconds)
 DEFAULT_TIMEOUT=60  # 1 minutes
 LONG_TIMEOUT=600    # 10 minutes
-SHORT_TIMEOUT=300    # 5 minutes
+SHORT_TIMEOUT=300   # 5 minutes
 
 # Colors
 BOLD="\e[1m"
@@ -325,18 +325,24 @@ create_directories() {
   return 0
 }
 
-# Function to download a file with auto-retry
+# Function to download a file with auto-retry and validation
 download_file() {
   local url="$1"
   local output_file="$2"
   local description="$3"
+  local verify_command="${4:-true}"
   local max_retries=3
   local retry_count=0
   local timeout=300
   
   if [ -f "$output_file" ] && [ -s "$output_file" ] && ! $FORCE_REINSTALL; then
-    log "INFO" "$description already downloaded at $output_file"
-    return 0
+    # Verify existing file if verification command is provided
+    if [ "$verify_command" != "true" ] && ! eval "$verify_command '$output_file'" &>/dev/null; then
+      log "WARNING" "Existing $description file is invalid, will re-download"
+    else
+      log "INFO" "$description already downloaded at $output_file"
+      return 0
+    fi
   fi
   
   log "STATUS" "Downloading $description..."
@@ -345,16 +351,44 @@ download_file() {
   while [ $retry_count -lt $max_retries ]; do
     retry_count=$((retry_count + 1))
     
-    # Try curl first, fallback to wget
+    # Try curl first with user agent and headers to avoid redirects, fallback to wget
     if command -v curl &>/dev/null; then
-      curl -sSL --connect-timeout 30 --retry 3 --retry-delay 5 -o "$output_file" "$url" && {
-        log "SUCCESS" "Downloaded $description successfully"
-        return 0
+      curl -sSL --connect-timeout 30 --retry 3 --retry-delay 5 \
+           -A "Mozilla/5.0 (X11; Linux x86_64)" \
+           -H "Accept: application/octet-stream" \
+           -o "$output_file" "$url" && {
+        # Verify downloaded file if verification command is provided
+        if [ "$verify_command" != "true" ]; then
+          if eval "$verify_command '$output_file'" &>/dev/null; then
+            log "SUCCESS" "Downloaded and verified $description successfully"
+            return 0
+          else
+            log "WARNING" "Downloaded $description is invalid, retrying..."
+            continue
+          fi
+        else
+          log "SUCCESS" "Downloaded $description successfully"
+          return 0
+        fi
       }
     elif command -v wget &>/dev/null; then
-      wget --timeout=30 --tries=3 --waitretry=5 -q "$url" -O "$output_file" && {
-        log "SUCCESS" "Downloaded $description successfully"
-        return 0
+      wget --timeout=30 --tries=3 --waitretry=5 -q \
+           --user-agent="Mozilla/5.0 (X11; Linux x86_64)" \
+           --header="Accept: application/octet-stream" \
+           "$url" -O "$output_file" && {
+        # Verify downloaded file
+        if [ "$verify_command" != "true" ]; then
+          if eval "$verify_command '$output_file'" &>/dev/null; then
+            log "SUCCESS" "Downloaded and verified $description successfully"
+            return 0
+          else
+            log "WARNING" "Downloaded $description is invalid, retrying..."
+            continue
+          fi
+        else
+          log "SUCCESS" "Downloaded $description successfully"
+          return 0
+        fi
       }
     else
       log "ERROR" "Neither curl nor wget is available"
@@ -367,6 +401,13 @@ download_file() {
   
   log "ERROR" "Failed to download $description after $max_retries attempts"
   return 1
+}
+
+# Function to verify Debian package
+verify_deb_package() {
+  local deb_file="$1"
+  dpkg-deb --info "$deb_file" &>/dev/null
+  return $?
 }
 
 # Function to run a command with timeout and output control
@@ -576,7 +617,7 @@ create_helper_scripts() {
   mkdir -p "$HELPERS_DIR"
   cat > "$HELPERS_DIR/install_nessus.sh" << 'ENDOFNESSUSSCRIPT'
 #!/bin/bash
-# Helper script to install Nessus
+# Helper script to install Nessus with improved download verification
 
 # Colors
 GREEN='\033[0;32m'
@@ -587,18 +628,38 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}[i] Starting Nessus installation...${NC}"
 
-# Check if the DEB package exists
+# Verify and download the Nessus package
 NESSUS_PKG="/opt/rta-deployment/downloads/Nessus-10.5.0-debian10_amd64.deb"
-if [ ! -f "$NESSUS_PKG" ]; then
-  echo -e "${YELLOW}[!] Nessus package not found, attempting to download...${NC}"
+NESSUS_URL="https://www.tenable.com/downloads/api/v1/public/pages/nessus/downloads/18189/download?i_agree_to_tenable_license_agreement=true"
+
+# Check if the DEB package exists and is valid
+if [ ! -f "$NESSUS_PKG" ] || ! dpkg-deb --info "$NESSUS_PKG" >/dev/null 2>&1; then
+  echo -e "${YELLOW}[!] Nessus package not found or invalid, downloading again...${NC}"
   
   mkdir -p "$(dirname "$NESSUS_PKG")"
   
-  # Try to download
-  wget -q --show-progress "https://www.tenable.com/downloads/api/v1/public/pages/nessus/downloads/18189/download?i_agree_to_tenable_license_agreement=true" -O "$NESSUS_PKG" || {
-    echo -e "${RED}[-] Failed to download Nessus. Please download it manually from Tenable's website.${NC}"
-    exit 1
+  # Use wget with proper headers to get a valid download
+  echo -e "${YELLOW}[*] Downloading Nessus...${NC}"
+  wget --content-disposition --header="Accept: application/x-debian-package" \
+       --header="User-Agent: Mozilla/5.0 (X11; Linux x86_64)" \
+       "$NESSUS_URL" -O "$NESSUS_PKG" || {
+    echo -e "${RED}[-] Failed to download Nessus from Tenable's site.${NC}"
+    
+    # Try alternative approach - direct download from Tenable server
+    echo -e "${YELLOW}[!] Trying alternative download approach...${NC}"
+    wget --content-disposition "https://www.tenable.com/downloads/nessus?direct=true" -O "$NESSUS_PKG" || {
+      echo -e "${RED}[-] All download attempts failed. Please download manually from Tenable's website.${NC}"
+      exit 1
+    }
   }
+  
+  # Verify the downloaded file is a valid Debian package
+  if ! dpkg-deb --info "$NESSUS_PKG" >/dev/null 2>&1; then
+    echo -e "${RED}[-] Downloaded file is not a valid Debian package.${NC}"
+    echo -e "${YELLOW}[!] The downloaded file might be an HTML page or an error response.${NC}"
+    echo -e "${YELLOW}[!] Please download Nessus manually from: https://www.tenable.com/downloads/nessus${NC}"
+    exit 1
+  fi
 fi
 
 # Install Nessus
@@ -647,7 +708,7 @@ NC='\033[0m' # No Color
 
 # Configuration Variables
 TV_PACKAGE="/opt/rta-deployment/downloads/teamviewer-host_amd64.deb"
-ASSIGNMENT_TOKEN="25998227-v1SCqDinbXPh3pHnBv7s"  # Your assignment token - REPLACE THIS WITH YOUR OWN
+ASSIGNMENT_TOKEN="25998227-v1SCqDinbXPh3pHnBv7s"  # Your assignment token
 GROUP_ID="g12345"  # Replace with your actual group ID
 ALIAS_PREFIX="$(hostname)-"  # Device names will be hostname + timestamp
 
@@ -684,44 +745,56 @@ if [ ! -f "$TV_PACKAGE" ]; then
   }
 fi
 
-# Check if we're on Kali Linux and need the PolicyKit1 fix
+# Install policykit-1 dependency for Kali Linux
 if grep -q "Kali" /etc/os-release; then
-  log "INFO" "Kali Linux detected, applying PolicyKit1 workaround..."
+  log "INFO" "Kali Linux detected, installing policykit-1 dependency..."
   
-  # Install equivs if not present
-  if ! command -v equivs-control &>/dev/null; then
-    log "INFO" "Installing equivs package..."
-    apt-get update
-    apt-get install -y equivs
+  # Direct installation of policykit-1
+  apt-get update
+  apt-get install -y policykit-1 || {
+    log "WARNING" "Could not install policykit-1 from repositories"
+    
+    # Alternative way - install polkit instead (provides policykit-1)
+    log "INFO" "Attempting to install polkit as an alternative..."
+    apt-get install -y polkit
+  }
+  
+  # Verify if policykit-1 or equivalent is installed
+  if ! dpkg -l | grep -E 'policykit-1|polkit' | grep -q '^ii'; then
+    log "WARNING" "Could not install required dependency. Creating manual override..."
+    
+    # Create directory for fake policykit-1 package
+    mkdir -p /tmp/fake-policykit
+    cd /tmp/fake-policykit
+    
+    # Creating a minimal debian package structure
+    mkdir -p DEBIAN
+    cat > DEBIAN/control << EOF
+Package: policykit-1
+Version: 1.0.0
+Architecture: all
+Maintainer: RTA Installer <rta@example.com>
+Description: Dummy policykit-1 package for TeamViewer
+Priority: optional
+Section: admin
+EOF
+    
+    # Build the package
+    log "INFO" "Building dummy policykit-1 package..."
+    dpkg-deb --build . policykit-1_1.0.0_all.deb
+    
+    # Install the dummy package
+    log "INFO" "Installing dummy policykit-1 package..."
+    dpkg -i policykit-1_1.0.0_all.deb || {
+      log "ERROR" "Failed to install dummy policykit-1 package"
+      cd - > /dev/null
+      rm -rf /tmp/fake-policykit
+      exit 1
+    }
+    
+    cd - > /dev/null
+    rm -rf /tmp/fake-policykit
   fi
-  
-  # Create directory for the temporary files
-  TEMP_DIR=$(mktemp -d)
-  cd "$TEMP_DIR"
-  
-  # Generate template for policykit-1
-  log "INFO" "Generating policykit-1 template..."
-  equivs-control policykit-1
-  
-  # Edit the template to create a minimal dummy package
-  log "INFO" "Creating minimal policykit-1 dummy package..."
-  sed -i "s/^#Package: .*/Package: policykit-1/" policykit-1
-  sed -i "s/^#Version: .*/Version: 124-3/" policykit-1
-  # Remove the Depends line completely
-  sed -i "/^#Depends:/d" policykit-1
-  sed -i "/^Description:/,$ s/^.*$/Description: Dummy package for TeamViewer dependency/" policykit-1
-  
-  # Build package
-  log "INFO" "Building policykit-1 dummy package..."
-  equivs-build policykit-1
-  
-  # Install package
-  log "INFO" "Installing policykit-1 dummy package..."
-  apt-get install -y ./policykit-1_*_all.deb
-  
-  # Cleanup
-  cd - > /dev/null
-  rm -rf "$TEMP_DIR"
 fi
 
 # Install TeamViewer
@@ -736,86 +809,41 @@ dpkg -i "$TV_PACKAGE" || {
   }
 }
 
-# Wait for TeamViewer service to start
-log "INFO" "Waiting for TeamViewer service to initialize..."
+# Make sure TeamViewer daemon is running
+log "INFO" "Starting TeamViewer daemon..."
 systemctl start teamviewerd || true
-sleep 10
-
-# Assign to your TeamViewer account using the assignment token
-log "STATUS" "Assigning device to your TeamViewer account..."
-teamviewer --daemon start || true
 sleep 5
 
-if [ -n "$ASSIGNMENT_TOKEN" ]; then
-  log "INFO" "Using assignment token: $ASSIGNMENT_TOKEN"
-  teamviewer assignment --token "$ASSIGNMENT_TOKEN" || true
-fi
-
-# Set a custom alias for this device
-TIMESTAMP=$(date +%Y%m%d%H%M%S)
-DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
-log "INFO" "Setting device alias to: $DEVICE_ALIAS"
-teamviewer alias "$DEVICE_ALIAS" || true
-
-# Configure TeamViewer for unattended access
-log "INFO" "Configuring for unattended access..."
-teamviewer setup --grant-easy-access || true
-
-# Disable commercial usage notification
-log "INFO" "Disabling commercial usage notification..."
-teamviewer config set General\\CUNotification 0 || true
-
-# Configure TeamViewer for headless operation
-log "INFO" "Configuring TeamViewer for headless operation..."
-
-# Disable waiting for X server
-log "INFO" "Disabling X server dependency..."
-teamviewer option set General/WaitForX false || true
-
-# Set AutoConnect to true
-log "INFO" "Enabling auto connect..."
-teamviewer option set General/AutoConnect true || true
-
-# Configure for auto start with system
-log "INFO" "Enabling autostart..."
-teamviewer daemon enable || true
-systemctl enable teamviewerd || true
-
-# Prevent TeamViewer from showing dialog boxes
-log "INFO" "Suppressing dialog boxes..."
-teamviewer option set General/SuppressDialogs true || true
-
-# Prevent GUI from opening by updating the global config
-if [ -f "/etc/teamviewer/global.conf" ]; then
-  log "INFO" "Updating global configuration..."
-  # Backup existing config
-  cp /etc/teamviewer/global.conf /etc/teamviewer/global.conf.bak
-  # Set ClientGuiRequired=false
-  if grep -q "ClientGuiRequired" /etc/teamviewer/global.conf; then
-    sed -i 's/ClientGuiRequired=.*/ClientGuiRequired=false/' /etc/teamviewer/global.conf
+# Configure TeamViewer
+if systemctl is-active --quiet teamviewerd; then
+  log "SUCCESS" "TeamViewer Host installed and daemon is running"
+  
+  # Set a custom alias for this device
+  TIMESTAMP=$(date +%Y%m%d%H%M%S)
+  DEVICE_ALIAS="${ALIAS_PREFIX}${TIMESTAMP}"
+  log "INFO" "Setting device alias to: $DEVICE_ALIAS"
+  teamviewer alias "$DEVICE_ALIAS" || true
+  
+  # Assign to account if token provided
+  if [ -n "$ASSIGNMENT_TOKEN" ]; then
+    log "INFO" "Assigning device to your TeamViewer account..."
+    teamviewer assignment --token "$ASSIGNMENT_TOKEN" || true
+  fi
+  
+  # Configure for unattended access
+  log "INFO" "Configuring for unattended access..."
+  teamviewer setup --grant-easy-access || true
+  
+  # Display the TeamViewer ID
+  TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
+  if [ -n "$TV_ID" ]; then
+    log "SUCCESS" "Configuration completed. TeamViewer ID: $TV_ID"
   else
-    echo "ClientGuiRequired=false" >> /etc/teamviewer/global.conf
+    log "WARNING" "Could not retrieve TeamViewer ID"
   fi
 else
-  # Create global config if it doesn't exist
-  log "INFO" "Creating global configuration..."
-  mkdir -p /etc/teamviewer
-  echo "ClientGuiRequired=false" > /etc/teamviewer/global.conf
-fi
-
-# Restart TeamViewer to apply all settings
-log "INFO" "Restarting TeamViewer service..."
-teamviewer --daemon restart || true
-sleep 5
-
-# Display the TeamViewer ID for reference
-TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
-if [ -n "$TV_ID" ]; then
-  log "SUCCESS" "TeamViewer Host installation and headless configuration completed!"
-  log "INFO" "TeamViewer ID: $TV_ID"
-else
-  log "WARNING" "TeamViewer installation completed, but could not retrieve ID."
-  log "INFO" "Check TeamViewer status with: systemctl status teamviewerd"
+  log "ERROR" "TeamViewer daemon is not running after installation"
+  exit 1
 fi
 
 exit 0
@@ -992,6 +1020,13 @@ if [ ! -f "$NINJA_PKG" ]; then
   else
     echo -e "${BLUE}[i] Found NinjaOne package at: $NINJA_PKG${NC}"
   fi
+fi
+
+# Verify the DEB package
+if ! dpkg-deb --info "$NINJA_PKG" >/dev/null 2>&1; then
+  echo -e "${RED}[-] The NinjaOne package is not a valid Debian package.${NC}"
+  echo -e "${YELLOW}[!] Please download a valid NinjaOne Agent package.${NC}"
+  exit 1
 fi
 
 # Install the DEB package
