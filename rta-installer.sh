@@ -2645,7 +2645,7 @@ create_validation_script() {
   if [ -f "$SCRIPTS_DIR/validate-tools.sh" ] && ! $FORCE_REINSTALL; then
     log "INFO" "Validation script already exists, skipping creation"
     return 0
-  }
+  fi
   
   # Create script
   cat > "$SCRIPTS_DIR/validate-tools.sh" << 'EOFSCRIPT'
@@ -3091,6 +3091,7 @@ add_report_section() {
     
     echo "" >> "$VALIDATION_REPORT"
 }
+EOFSCRIPT
 
 # Function to export HTML report
 export_html_report() {
