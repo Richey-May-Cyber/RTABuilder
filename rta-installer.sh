@@ -2648,7 +2648,7 @@ create_validation_script() {
   }
   
   # Create script
-  cat > "$SCRIPTS_DIR/validate-tools.sh" << 'EOF'
+  cat > "$SCRIPTS_DIR/validate-tools.sh" << 'EOFSCRIPT'
 #!/bin/bash
 # =================================================================
 # RTA Tools Validation Script v3.0
@@ -2682,7 +2682,7 @@ echo "Date: $(date)" >> "$VALIDATION_LOG"
 echo "" >> "$VALIDATION_LOG"
 
 # Initialize report file with nice formatting
-cat > "$VALIDATION_REPORT" << EOF
+cat > "$VALIDATION_REPORT" << REPORT_EOF
 =================================================================
                SECURITY TOOLS VALIDATION REPORT
 =================================================================
@@ -2690,7 +2690,7 @@ Date: $(date)
 System: $(hostname) - $(uname -r)
 Kali Version: $(cat /etc/os-release | grep VERSION= | cut -d'"' -f2 2>/dev/null || echo "Unknown")
 
-EOF
+REPORT_EOF
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
