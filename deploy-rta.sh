@@ -1441,7 +1441,7 @@ main() {
     log "STATUS" "Performing desktop-only installation..."
     if prompt_continue "configure desktop environment"; then
       configure_system || log "WARNING" "Desktop configuration encountered some issues"
-    }
+    fi
   elif $CORE_TOOLS_ONLY; then
     log "STATUS" "Installing core tools only..."
     
@@ -1454,7 +1454,7 @@ main() {
       # Install core PIPX tools
       local core_pipx=$(get_config_value "$CONFIG_FILE" "pipx_tools" "impacket")
       install_pipx_packages "$core_pipx" || log "WARNING" "Some core PIPX tools failed to install"
-    }
+    fi
   else
     # Full installation
     log "STATUS" "Performing full installation..."
@@ -1468,8 +1468,8 @@ main() {
         install_apt_packages "$apt_tools" || log "WARNING" "Some APT tools failed to install"
       else
         log "INFO" "No APT tools specified in configuration"
-      }
-    }
+      fi
+    fi
     
     # Step 8.2: Install PIPX packages
     if prompt_continue "install PIPX packages"; then
@@ -1480,8 +1480,8 @@ main() {
         install_pipx_packages "$pipx_tools" || log "WARNING" "Some PIPX tools failed to install"
       else
         log "INFO" "No PIPX tools specified in configuration"
-      }
-    }
+      fi
+    fi
     
     # Step 8.3: Install Git repositories
     if prompt_continue "install Git repositories"; then
@@ -1492,8 +1492,8 @@ main() {
         install_git_repos "$git_tools" || log "WARNING" "Some Git repositories failed to install"
       else
         log "INFO" "No Git repositories specified in configuration"
-      }
-    }
+      fi
+    fi
     
     # Step 8.4: Run manual tool installation helpers
     if prompt_continue "install manual tools"; then
@@ -1504,19 +1504,19 @@ main() {
         run_installation_helpers "$manual_tools" || log "WARNING" "Some manual tools failed to install"
       else
         log "INFO" "No manual tools specified in configuration"
-      }
-    }
+      fi
+    fi
     
     # Step 8.5: Configure system
     if prompt_continue "configure system settings"; then
       configure_system || log "WARNING" "System configuration encountered some issues"
-    }
-  }
+    fi
+  fi
   
   # Step 9: Create system snapshot
   if prompt_continue "create system snapshot"; then
     create_system_snapshot || log "WARNING" "Failed to create system snapshot"
-  }
+  fi
   
   # Step 10: Run validation
   if prompt_continue "validate tool installation"; then
@@ -1528,8 +1528,8 @@ main() {
       }
     else
       log "WARNING" "Validation script not found at $SCRIPTS_DIR/validate-tools.sh"
-    }
-  }
+    fi
+  fi
   
   # Step 11: Final steps
   log "SUCCESS" "RTA deployment completed successfully"
