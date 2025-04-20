@@ -52,52 +52,76 @@ fi
 if grep -q "Kali" /etc/os-release; then
   log "INFO" "Kali Linux detected, installing policykit-1 dependency..."
   
-  # Direct installation of policykit-1
-  apt-get update
-  apt-get install -y policykit-1 || {
-    log "WARNING" "Could not install policykit-1 from repositories"
-    
-    # Alternative way - install polkit instead (provides policykit-1)
-    log "INFO" "Attempting to install polkit as an alternative..."
-    apt-get install -y polkit
-  }
-  
-  # Verify if policykit-1 or equivalent is installed
-  if ! dpkg -l | grep -E 'policykit-1|polkit' | grep -q '^ii'; then
-    log "WARNING" "Could not install required dependency. Creating manual override..."
-    
-    # Create directory for fake policykit-1 package
-    mkdir -p /tmp/fake-policykit/DEBIAN
-    
-    # Creating a minimal debian package structure
-    cat > /tmp/fake-policykit/DEBIAN/control << PKG
-Package: policykit-1
-Version: 1.0.0
-Architecture: all
-Maintainer: RTA Installer <rta@example.com>
-Description: Dummy policykit-1 package for TeamViewer
-Priority: optional
-Section: admin
-PKG
-    
-    # Build the package
-    log "INFO" "Building dummy policykit-1 package..."
-    dpkg-deb --build /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
-    
-    # Install the dummy package
-    log "INFO" "Installing dummy policykit-1 package..."
-    dpkg -i /tmp/policykit-1_1.0.0_all.deb || {
-      log "ERROR" "Failed to install dummy policykit-1 package"
-      rm -rf /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
-      exit 1
-    }
-    
-    rm -rf /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
+  # Check if policykit-1 or polkit is already installed
+  if dpkg -l | grep -E 'policykit-1|polkit' | grep -q '^ii'; then
+    log "SUCCESS" "PolicyKit already installed"
+  else
+    # Try direct installation first
+    apt-get update
+    if apt-get install -y policykit-1 2>/dev/null; then
+      log "SUCCESS" "Successfully installed policykit-1"
+    else
+      log "WARNING" "No installation candidate for policykit-1"
+      
+      # Try to install polkit as an alternative
+      if apt-get install -y polkit 2>/dev/null; then
+        log "SUCCESS" "Successfully installed polkit as an alternative"
+      else
+        log "WARNING" "Could not install polkit either. Creating equivs package..."
+        
+        # Install equivs if not already installed
+        if ! command -v equivs-control &>/dev/null; then
+          log "INFO" "Installing equivs package..."
+          apt-get install -y equivs || {
+            log "ERROR" "Failed to install equivs"
+            exit 1
+          }
+        fi
+        
+        # Create a temporary directory
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR" || exit 1
+        
+        # Generate the equivs control file
+        log "INFO" "Generating equivs control file..."
+        equivs-control policykit-1
+        
+        # Edit the control file
+        sed -i 's/^#\s*Version:.*/Version: 124-3/' policykit-1
+        sed -i 's/^#\s*Depends:.*/Depends: pkexec, polkitd/' policykit-1
+        sed -i 's/^Package:.*/Package: policykit-1/' policykit-1
+        
+        # Build the package
+        log "INFO" "Building policykit-1 package..."
+        equivs-build policykit-1 || {
+          log "ERROR" "Failed to build policykit-1 package"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        }
+        
+        # Install the package
+        log "INFO" "Installing dummy policykit-1 package..."
+        apt-get install -y ./policykit-1_124-3_all.deb || {
+          log "ERROR" "Failed to install dummy policykit-1 package"
+          rm -rf "$TEMP_DIR"
+          exit 1
+        }
+        
+        # Fix permissions on polkit agent helper if it exists
+        if [ -f "/usr/lib/policykit-1/polkit-agent-helper-1" ]; then
+          log "INFO" "Setting correct permissions on polkit-agent-helper-1..."
+          chmod 4755 /usr/lib/policykit-1/polkit-agent-helper-1
+        fi
+        
+        # Cleanup
+        rm -rf "$TEMP_DIR"
+      fi
+    fi
   fi
 fi
 
 # Install TeamViewer
-log "STATUS" "Installing TeamViewer Host..."
+log "INFO" "Installing TeamViewer Host..."
 apt-get update
 dpkg -i "$TV_PACKAGE" || {
   log "INFO" "Fixing dependencies..."
