@@ -1402,7 +1402,7 @@ main() {
     echo -e "${RED}[✗] This script must be run as root${NC}"
     echo -e "${YELLOW}[!] Please run again with sudo:${NC} sudo $0 $ORIGINAL_ARGS"
     exit 1
-  }
+  fi
   
   # Step 3: Check dependencies
   if ! check_dependencies; then
