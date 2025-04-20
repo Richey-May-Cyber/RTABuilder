@@ -9,9 +9,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration Variables
-TV_PACKAGE="/opt/rta-deployment/downloads/teamviewer-host_amd64.deb"
-ASSIGNMENT_TOKEN="25998227-v1SCqDinbXPh3pHnBv7s"  # Your assignment token
-GROUP_ID="g12345"  # Replace with your actual group ID
+TV_PACKAGE="/opt/security-tools/downloads/teamviewer-host_amd64.deb"
+ASSIGNMENT_TOKEN=""  # Your assignment token (optional)
 ALIAS_PREFIX="$(hostname)-"  # Device names will be hostname + timestamp
 
 # Function to log messages
@@ -34,13 +33,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Create directory if it doesn't exist
+mkdir -p "$(dirname "$TV_PACKAGE")"
+
 # Check if the DEB package exists
 if [ ! -f "$TV_PACKAGE" ]; then
   log "WARNING" "TeamViewer Host package not found at $TV_PACKAGE"
   
   # Try to download it
   log "INFO" "Attempting to download TeamViewer Host..."
-  mkdir -p "$(dirname "$TV_PACKAGE")"
   wget -q --show-progress https://download.teamviewer.com/download/linux/teamviewer-host_amd64.deb -O "$TV_PACKAGE" || {
     log "ERROR" "Failed to download TeamViewer Host package"
     exit 1
@@ -66,12 +67,10 @@ if grep -q "Kali" /etc/os-release; then
     log "WARNING" "Could not install required dependency. Creating manual override..."
     
     # Create directory for fake policykit-1 package
-    mkdir -p /tmp/fake-policykit
-    cd /tmp/fake-policykit
+    mkdir -p /tmp/fake-policykit/DEBIAN
     
     # Creating a minimal debian package structure
-    mkdir -p DEBIAN
-    cat > DEBIAN/control << EOF
+    cat > /tmp/fake-policykit/DEBIAN/control << PKG
 Package: policykit-1
 Version: 1.0.0
 Architecture: all
@@ -79,23 +78,21 @@ Maintainer: RTA Installer <rta@example.com>
 Description: Dummy policykit-1 package for TeamViewer
 Priority: optional
 Section: admin
-EOF
+PKG
     
     # Build the package
     log "INFO" "Building dummy policykit-1 package..."
-    dpkg-deb --build . policykit-1_1.0.0_all.deb
+    dpkg-deb --build /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
     
     # Install the dummy package
     log "INFO" "Installing dummy policykit-1 package..."
-    dpkg -i policykit-1_1.0.0_all.deb || {
+    dpkg -i /tmp/policykit-1_1.0.0_all.deb || {
       log "ERROR" "Failed to install dummy policykit-1 package"
-      cd - > /dev/null
-      rm -rf /tmp/fake-policykit
+      rm -rf /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
       exit 1
     }
     
-    cd - > /dev/null
-    rm -rf /tmp/fake-policykit
+    rm -rf /tmp/fake-policykit /tmp/policykit-1_1.0.0_all.deb
   fi
 fi
 
@@ -136,6 +133,18 @@ if systemctl is-active --quiet teamviewerd; then
   log "INFO" "Configuring for unattended access..."
   teamviewer setup --grant-easy-access || true
   
+  # Create desktop entry
+  cat > /usr/share/applications/teamviewer.desktop << DESKTOP
+[Desktop Entry]
+Name=TeamViewer
+Comment=Remote Control Application
+Exec=teamviewer
+Icon=/opt/teamviewer/tv_bin/desktop/teamviewer.png
+Terminal=false
+Type=Application
+Categories=Network;RemoteAccess;
+DESKTOP
+  
   # Display the TeamViewer ID
   TV_ID=$(teamviewer info 2>/dev/null | grep "TeamViewer ID:" | awk '{print $3}')
   if [ -n "$TV_ID" ]; then
@@ -148,4 +157,39 @@ else
   exit 1
 fi
 
+# Add to startup applications
+if [ -d "/etc/xdg/autostart" ]; then
+  log "INFO" "Adding TeamViewer to startup applications..."
+  cat > /etc/xdg/autostart/teamviewerd.desktop << AUTOSTART
+[Desktop Entry]
+Type=Application
+Name=TeamViewer
+Comment=TeamViewer Remote Control Application
+Exec=teamviewer
+Terminal=false
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+  log "SUCCESS" "TeamViewer added to startup applications"
+fi
+
+# Create .desktop file for rmcyber user
+if [ -d "/home/rmcyber/.local/share/applications" ] || [ -d "/home/rmcyber/Desktop" ]; then
+  log "INFO" "Creating desktop shortcut for rmcyber user..."
+  mkdir -p "/home/rmcyber/.local/share/applications"
+  cp /usr/share/applications/teamviewer.desktop "/home/rmcyber/.local/share/applications/"
+  
+  # Also add to Desktop
+  if [ -d "/home/rmcyber/Desktop" ]; then
+    cp /usr/share/applications/teamviewer.desktop "/home/rmcyber/Desktop/"
+    chmod +x "/home/rmcyber/Desktop/teamviewer.desktop"
+  fi
+  
+  # Fix ownership
+  chown -R rmcyber:rmcyber "/home/rmcyber/.local/share/applications"
+  [ -d "/home/rmcyber/Desktop" ] && chown rmcyber:rmcyber "/home/rmcyber/Desktop/teamviewer.desktop"
+  
+  log "SUCCESS" "Desktop shortcuts created for rmcyber user"
+fi
+
+log "SUCCESS" "TeamViewer installation and configuration completed"
 exit 0
