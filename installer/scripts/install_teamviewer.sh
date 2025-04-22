@@ -1,5 +1,6 @@
 #!/bin/bash
-# TeamViewer Host Installer with advanced configuration and Kali Linux compatibility fixes
+# TeamViewer Host Installer with PolicyKit fix
+# This script installs TeamViewer Host with a fix for PolicyKit issues on Kali Linux
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -9,9 +10,15 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration Variables
-TV_PACKAGE="/opt/security-tools/downloads/teamviewer-host_amd64.deb"
+TV_PACKAGE="/tmp/teamviewer-host_amd64.deb"
 ASSIGNMENT_TOKEN=""  # Your assignment token (optional)
 ALIAS_PREFIX="$(hostname)-"  # Device names will be hostname + timestamp
+TOOLS_DIR="/tmp/tv-installer"
+LOG_DIR="/tmp/tv-installer/logs"
+
+# Create necessary directories
+mkdir -p "$TOOLS_DIR"
+mkdir -p "$LOG_DIR"
 
 # Function to log messages
 log() {
@@ -27,12 +34,30 @@ log() {
   esac
 }
 
-# TeamViewer Host
-print_status "Installing TeamViewer Host..."
-cd "$TOOLS_DIR"
+# Function to print status messages (for compatibility with your original script)
+print_status() {
+  log "INFO" "$1"
+}
+
+print_success() {
+  log "SUCCESS" "$1"
+}
+
+print_error() {
+  log "ERROR" "$1"
+}
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+  log "ERROR" "Please run as root or with sudo"
+  exit 1
+fi
 
 # Fix the policykit-1 package maintainer field
-print_status "Fixing policykit-1 package metadata..."
+log "INFO" "Installing TeamViewer Host..."
+cd "$TOOLS_DIR"
+
+log "INFO" "Fixing policykit-1 package metadata..."
 mkdir -p "$TOOLS_DIR/policykit-dummy-fixed/DEBIAN"
 
 # Create updated control file with Maintainer field
@@ -50,31 +75,22 @@ Description: Transitional package for PolicyKit
 EOF
 
 # Build the updated package
-print_status "Building updated policykit-1 package..."
+log "INFO" "Building updated policykit-1 package..."
 dpkg-deb -b "$TOOLS_DIR/policykit-dummy-fixed" "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb" >> "$LOG_DIR/policykit_fix.log" 2>&1
 
 # Install the updated package
-print_status "Installing updated policykit-1 package..."
+log "INFO" "Installing updated policykit-1 package..."
 dpkg -i "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb" >> "$LOG_DIR/policykit_fix.log" 2>&1
 
 if [ $? -eq 0 ]; then
-    print_success "Fixed policykit-1 package metadata."
+    log "SUCCESS" "Fixed policykit-1 package metadata."
     
     # Clean up
     rm -rf "$TOOLS_DIR/policykit-dummy-fixed"
     rm -f "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb"
 else
-    print_error "Failed to fix policykit-1 package metadata. The warning will continue but it's safe to ignore."
+    log "ERROR" "Failed to fix policykit-1 package metadata. The warning will continue but it's safe to ignore."
 fi
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  log "ERROR" "Please run as root or with sudo"
-  exit 1
-fi
-
-# Create directory if it doesn't exist
-mkdir -p "$(dirname "$TV_PACKAGE")"
 
 # Check if the DEB package exists
 if [ ! -f "$TV_PACKAGE" ]; then
@@ -86,78 +102,6 @@ if [ ! -f "$TV_PACKAGE" ]; then
     log "ERROR" "Failed to download TeamViewer Host package"
     exit 1
   }
-fi
-
-# Install policykit-1 dependency for Kali Linux
-if grep -q "Kali" /etc/os-release; then
-  log "INFO" "Kali Linux detected, installing policykit-1 dependency..."
-  
-  # Check if policykit-1 or polkit is already installed
-  if dpkg -l | grep -E 'policykit-1|polkit' | grep -q '^ii'; then
-    log "SUCCESS" "PolicyKit already installed"
-  else
-    # Try direct installation first
-    apt-get update
-    if apt-get install -y policykit-1 2>/dev/null; then
-      log "SUCCESS" "Successfully installed policykit-1"
-    else
-      log "WARNING" "No installation candidate for policykit-1"
-      
-      # Try to install polkit as an alternative
-      if apt-get install -y polkit 2>/dev/null; then
-        log "SUCCESS" "Successfully installed polkit as an alternative"
-      else
-        log "WARNING" "Could not install polkit either. Creating equivs package..."
-        
-        # Install equivs if not already installed
-        if ! command -v equivs-control &>/dev/null; then
-          log "INFO" "Installing equivs package..."
-          apt-get install -y equivs || {
-            log "ERROR" "Failed to install equivs"
-            exit 1
-          }
-        fi
-        
-        # Create a temporary directory
-        TEMP_DIR=$(mktemp -d)
-        cd "$TEMP_DIR" || exit 1
-        
-        # Generate the equivs control file
-        log "INFO" "Generating equivs control file..."
-        equivs-control policykit-1
-        
-        # Edit the control file
-        sed -i 's/^#\s*Version:.*/Version: 124-3/' policykit-1
-        sed -i 's/^#\s*Depends:.*/Depends: pkexec, polkitd/' policykit-1
-        sed -i 's/^Package:.*/Package: policykit-1/' policykit-1
-        
-        # Build the package
-        log "INFO" "Building policykit-1 package..."
-        equivs-build policykit-1 || {
-          log "ERROR" "Failed to build policykit-1 package"
-          rm -rf "$TEMP_DIR"
-          exit 1
-        }
-        
-        # Install the package
-        log "INFO" "Installing dummy policykit-1 package..."
-        apt-get install -y ./policykit-1_124-3_all.deb || {
-          log "ERROR" "Failed to install dummy policykit-1 package"
-          rm -rf "$TEMP_DIR"
-          exit 1
-        }
-        
-        # Fix permissions on polkit agent helper if it exists
-        if [ -f "/usr/lib/policykit-1/polkit-agent-helper-1" ]; then
-          log "INFO" "Setting correct permissions on polkit-agent-helper-1..."
-          chmod 4755 /usr/lib/policykit-1/polkit-agent-helper-1
-        fi
-        
-        # Cleanup
-        rm -rf "$TEMP_DIR"
-      fi
-    fi
-  fi
 fi
 
 # Install TeamViewer
@@ -236,24 +180,33 @@ AUTOSTART
   log "SUCCESS" "TeamViewer added to startup applications"
 fi
 
-# Create .desktop file for rmcyber user
-if [ -d "/home/rmcyber/.local/share/applications" ] || [ -d "/home/rmcyber/Desktop" ]; then
-  log "INFO" "Creating desktop shortcut for rmcyber user..."
-  mkdir -p "/home/rmcyber/.local/share/applications"
-  cp /usr/share/applications/teamviewer.desktop "/home/rmcyber/.local/share/applications/"
-  
-  # Also add to Desktop
-  if [ -d "/home/rmcyber/Desktop" ]; then
-    cp /usr/share/applications/teamviewer.desktop "/home/rmcyber/Desktop/"
-    chmod +x "/home/rmcyber/Desktop/teamviewer.desktop"
+# Create .desktop file for user
+current_user=$(who | awk '{print $1}' | grep -v "root" | head -1)
+if [ -n "$current_user" ]; then
+  user_home="/home/$current_user"
+  if [ -d "$user_home/.local/share/applications" ] || [ -d "$user_home/Desktop" ]; then
+    log "INFO" "Creating desktop shortcut for user $current_user..."
+    mkdir -p "$user_home/.local/share/applications"
+    cp /usr/share/applications/teamviewer.desktop "$user_home/.local/share/applications/"
+    
+    # Also add to Desktop
+    if [ -d "$user_home/Desktop" ]; then
+      cp /usr/share/applications/teamviewer.desktop "$user_home/Desktop/"
+      chmod +x "$user_home/Desktop/teamviewer.desktop"
+    fi
+    
+    # Fix ownership
+    chown -R "$current_user:$current_user" "$user_home/.local/share/applications"
+    [ -d "$user_home/Desktop" ] && chown "$current_user:$current_user" "$user_home/Desktop/teamviewer.desktop"
+    
+    log "SUCCESS" "Desktop shortcuts created for user $current_user"
   fi
-  
-  # Fix ownership
-  chown -R rmcyber:rmcyber "/home/rmcyber/.local/share/applications"
-  [ -d "/home/rmcyber/Desktop" ] && chown rmcyber:rmcyber "/home/rmcyber/Desktop/teamviewer.desktop"
-  
-  log "SUCCESS" "Desktop shortcuts created for rmcyber user"
 fi
+
+# Clean up
+log "INFO" "Cleaning up..."
+rm -rf "$TOOLS_DIR"
+[ -f "$TV_PACKAGE" ] && rm -f "$TV_PACKAGE"
 
 log "SUCCESS" "TeamViewer installation and configuration completed"
 exit 0
