@@ -1,102 +1,137 @@
 #!/bin/bash
-# Nessus Installation Script with enhanced download verification and configuration
+# Standalone Nessus Installation Script
 
-# Colors and logging functions (assuming these are defined elsewhere in your main script)
-# If not, uncomment these definitions:
-# GREEN='\033[0;32m'
-# YELLOW='\033[1;33m'
-# RED='\033[0;31m'
-# BLUE='\033[0;34m'
-# NC='\033[0m' # No Color
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Define helper functions
+echo_status() {
+  echo -e "${BLUE}[*] $1${NC}"
+}
+
+echo_success() {
+  echo -e "${GREEN}[+] $1${NC}"
+}
+
+echo_error() {
+  echo -e "${RED}[-] $1${NC}"
+}
+
+echo_info() {
+  echo -e "${BLUE}[i] $1${NC}"
+}
+
+echo_warning() {
+  echo -e "${YELLOW}[!] $1${NC}"
+}
+
+# Custom timeout function
+run_command_with_timeout() {
+  local cmd="$1"
+  local timeout="$2"
+  local log_file="$3"
+  
+  # Create log directory if it doesn't exist
+  mkdir -p "$(dirname "$log_file")"
+  
+  # Run the command with timeout
+  timeout "$timeout" bash -c "$cmd" > "$log_file" 2>&1
+  return $?
+}
 
 # Define variables
-TOOLS_DIR="$TOOLS_DIR"  # This should be set in your main script
-LOG_DIR="$LOG_DIR"      # This should be set in your main script
-NESSUS_VERSION="10.8.3"
-NESSUS_PKG="Nessus-${NESSUS_VERSION}-debian10_amd64.deb"
+TOOLS_DIR="/opt/security-tools/downloads"
+LOG_DIR="/var/log/security-tools"
+NESSUS_VERSION="10.8.4"
+NESSUS_PKG="Nessus-${NESSUS_VERSION}-ubuntu1604_amd64.deb"
 NESSUS_URL="https://www.tenable.com/downloads/api/v2/pages/nessus/files/${NESSUS_PKG}"
 NESSUS_SERVICE="nessusd"
-PRIMARY_USERNAME="rmcyber"  # Change this to your preferred username if needed
+PRIMARY_USERNAME="rmcyber"
 
-print_status "Installing Nessus..."
+# Create directories
+mkdir -p "$TOOLS_DIR"
+mkdir -p "$LOG_DIR"
+
+echo_status "Installing Nessus..."
 
 # Check if Nessus is already installed
 if dpkg -l | grep -q "^ii.*nessus" || [ -d "/opt/nessus" ]; then
-  print_status "Nessus appears to be already installed"
+  echo_warning "Nessus appears to be already installed"
   
   # Check if service is running
   if systemctl is-active --quiet "$NESSUS_SERVICE"; then
-    print_success "Nessus is running. Access it at: https://localhost:8834/"
+    echo_success "Nessus is running. Access it at: https://localhost:8834/"
     
     # Ask if user wants to reinstall
     read -p "Do you want to reinstall Nessus? (y/N) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      print_info "Keeping existing installation"
-      log_result "nessus" "SKIPPED" "Already installed and running"
+      echo_info "Keeping existing installation"
       exit 0
     fi
     
-    print_status "Stopping and removing existing Nessus installation..."
+    echo_warning "Stopping and removing existing Nessus installation..."
     systemctl stop "$NESSUS_SERVICE" >> "$LOG_DIR/nessus_uninstall.log" 2>&1
     apt-get remove -y nessus >> "$LOG_DIR/nessus_uninstall.log" 2>&1
     rm -rf /opt/nessus >> "$LOG_DIR/nessus_uninstall.log" 2>&1
   fi
 fi
 
-# Create download directory if necessary
-mkdir -p "$TOOLS_DIR"
+# Change to the tools directory
 cd "$TOOLS_DIR"
 
 # Try direct download with curl first
-print_status "Attempting to download Nessus..."
-run_with_timeout "curl -k --request GET --url '$NESSUS_URL' --output $NESSUS_PKG" 300 "$LOG_DIR/nessus_download.log" "nessus"
+echo_status "Attempting to download Nessus with curl..."
+run_command_with_timeout "curl -k --request GET --url '$NESSUS_URL' --output $NESSUS_PKG" 300 "$LOG_DIR/nessus_download.log"
 
 # Check if download succeeded and is a valid package
 if [ $? -eq 0 ] && [ -f "$NESSUS_PKG" ] && dpkg-deb --info "$NESSUS_PKG" >/dev/null 2>&1; then
-    print_status "Download successful. Installing Nessus package..."
+    echo_success "Download successful. Installing Nessus package..."
 else
-    print_error "Direct download failed or invalid package. Trying alternative download method..."
+    echo_error "Direct download failed or invalid package. Trying alternative download method..."
     
     # Try using wget with additional headers as an alternative
-    run_with_timeout "wget --no-check-certificate --content-disposition --header=\"Accept: application/x-debian-package\" --header=\"User-Agent: Mozilla/5.0 (X11; Linux x86_64)\" '$NESSUS_URL' -O $NESSUS_PKG" 300 "$LOG_DIR/nessus_alt_download.log" "nessus"
+    echo_status "Trying alternative download with wget..."
+    run_command_with_timeout "wget --no-check-certificate --content-disposition --header=\"Accept: application/x-debian-package\" --header=\"User-Agent: Mozilla/5.0 (X11; Linux x86_64)\" '$NESSUS_URL' -O $NESSUS_PKG" 300 "$LOG_DIR/nessus_alt_download.log"
     
     # If that fails, try another approach
     if [ $? -ne 0 ] || ! dpkg-deb --info "$NESSUS_PKG" >/dev/null 2>&1; then
-        print_error "Alternative download also failed. Trying direct download from Tenable..."
+        echo_error "Alternative download also failed. Trying direct download from Tenable..."
         
-        # Try a different URL format - direct download
-        run_with_timeout "wget --no-check-certificate \"https://www.tenable.com/downloads/nessus?direct=true\" -O $NESSUS_PKG" 300 "$LOG_DIR/nessus_direct_download.log" "nessus"
+        # Try one more approach - direct download
+        run_command_with_timeout "wget --no-check-certificate \"https://www.tenable.com/downloads/nessus?direct=true\" -O $NESSUS_PKG" 300 "$LOG_DIR/nessus_direct_download.log"
         
         # Final check
         if [ $? -ne 0 ] || ! dpkg-deb --info "$NESSUS_PKG" >/dev/null 2>&1; then
-            print_error "All download attempts failed. Please download Nessus manually from Tenable's website."
-            log_result "nessus" "FAILED" "Download failed"
+            echo_error "All download attempts failed. Please download Nessus manually from Tenable's website."
             exit 1
         fi
     fi
 fi
 
 # Install Nessus
-print_status "Installing Nessus package..."
+echo_status "Installing Nessus package..."
 apt-get update >> "$LOG_DIR/nessus_install.log" 2>&1
 dpkg -i "$NESSUS_PKG" >> "$LOG_DIR/nessus_install.log" 2>&1
 
 # Fix dependencies if needed
 if [ $? -ne 0 ]; then
-    print_status "Fixing dependencies..."
+    echo_warning "Fixing dependencies..."
     apt-get install -f -y >> "$LOG_DIR/nessus_install.log" 2>&1
     dpkg -i "$NESSUS_PKG" >> "$LOG_DIR/nessus_install.log" 2>&1
     
     if [ $? -ne 0 ]; then
-        print_error "Failed to install Nessus"
-        log_result "nessus" "FAILED" "Installation failed"
+        echo_error "Failed to install Nessus"
         exit 1
     fi
 fi
 
 # Start and enable Nessus service
-print_status "Starting Nessus service..."
+echo_status "Starting Nessus service..."
 systemctl enable nessusd >> "$LOG_DIR/nessus_install.log" 2>&1
 systemctl start nessusd >> "$LOG_DIR/nessus_install.log" 2>&1
 
@@ -222,20 +257,36 @@ CONFIG_SCRIPT
 
 chmod +x "/usr/local/bin/nessus-config"
 
+# Create startup check/notification
+cat > "/etc/profile.d/nessus-check.sh" << 'PROFILE_SCRIPT'
+#!/bin/bash
+# Display Nessus status notification on login
+
+# Only run for interactive shells
+if [[ $- == *i* ]] && [ "$EUID" != "0" ]; then
+  if systemctl is-active --quiet nessusd; then
+    echo -e "\033[0;32m[✓] Nessus is running - Access at: https://localhost:8834/\033[0m"
+  else
+    echo -e "\033[0;33m[!] Nessus is not running - Start with: sudo systemctl start nessusd\033[0m"
+  fi
+fi
+PROFILE_SCRIPT
+
+chmod +x "/etc/profile.d/nessus-check.sh"
+
 # Check if service is running properly
 if systemctl is-active --quiet "$NESSUS_SERVICE"; then
-  print_success "Nessus installed and service started successfully"
-  print_info "Access Nessus at: https://localhost:8834/"
-  print_info "Complete setup by creating an account and activating your license"
-  print_info "For configuration options, run: sudo nessus-config"
-  log_result "nessus" "SUCCESS" "Installed and service started. Complete setup at https://localhost:8834/"
+  echo_success "Nessus installed and service started successfully"
+  echo_info "Access Nessus at: https://localhost:8834/"
+  echo_info "Complete setup by creating an account and activating your license"
+  echo_info "For configuration options, run: sudo nessus-config"
 else
-  print_warning "Nessus installed but service not running. Try starting manually:"
-  print_info "systemctl start nessusd"
-  log_result "nessus" "WARNING" "Installed but service failed to start"
+  echo_warning "Nessus installed but service not running. Try starting manually:"
+  echo_info "systemctl start nessusd"
 fi
 
 # Clean up
 rm -f "$NESSUS_PKG"
 
+echo_success "Nessus installation completed"
 exit 0
