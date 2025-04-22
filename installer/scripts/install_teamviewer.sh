@@ -77,6 +77,46 @@ if grep -q "Kali" /etc/os-release; then
             exit 1
           }
         fi
+
+# TeamViewer Host
+print_status "Installing TeamViewer Host..."
+cd "$TOOLS_DIR"
+
+# Fix the policykit-1 package maintainer field
+print_status "Fixing policykit-1 package metadata..."
+mkdir -p "$TOOLS_DIR/policykit-dummy-fixed/DEBIAN"
+
+# Create updated control file with Maintainer field
+cat > "$TOOLS_DIR/policykit-dummy-fixed/DEBIAN/control" << EOF
+Package: policykit-1
+Version: 1.0
+Section: misc
+Priority: optional
+Architecture: all
+Depends: polkitd, pkexec
+Maintainer: System Administrator <root@localhost>
+Description: Transitional package for PolicyKit 
+ This is a dummy package that provides policykit-1 while depending on
+ modern PolicyKit packages polkitd and pkexec.
+EOF
+
+# Build the updated package
+print_status "Building updated policykit-1 package..."
+dpkg-deb -b "$TOOLS_DIR/policykit-dummy-fixed" "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb" >> "$LOG_DIR/policykit_fix.log" 2>&1
+
+# Install the updated package
+print_status "Installing updated policykit-1 package..."
+dpkg -i "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb" >> "$LOG_DIR/policykit_fix.log" 2>&1
+
+if [ $? -eq 0 ]; then
+    print_success "Fixed policykit-1 package metadata."
+    
+    # Clean up
+    rm -rf "$TOOLS_DIR/policykit-dummy-fixed"
+    rm -f "$TOOLS_DIR/policykit-1_1.0_all_fixed.deb"
+else
+    print_error "Failed to fix policykit-1 package metadata. The warning will continue but it's safe to ignore."
+fi
         
         # Create a temporary directory
         TEMP_DIR=$(mktemp -d)
