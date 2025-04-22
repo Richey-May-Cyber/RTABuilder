@@ -8,13 +8,54 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
-echo -e "${BLUE}[i] Starting Burp Suite Professional installation...${NC}"
-
 # Configuration Variables
 BURP_DIR="/opt/BurpSuitePro"
 DOWNLOAD_DIR="/opt/security-tools/downloads"
 PRIMARY_USERNAME="rmcyber" # The primary user of this system
 BURP_JAR="$DOWNLOAD_DIR/burpsuite_pro.jar"
+DEFAULT_DOWNLOAD_URL="https://portswigger-cdn.net/burp/releases/download?product=pro&version=2025.3.2&type=LinuxX64"
+
+# Function to uninstall Burp Suite Professional
+uninstall_burpsuite() {
+    echo -e "${YELLOW}[*] Uninstalling Burp Suite Professional...${NC}"
+    
+    # Remove files and directories
+    rm -rf "$BURP_DIR"
+    rm -f "/usr/bin/burpsuite"
+    rm -f "/usr/share/applications/burpsuite_pro.desktop"
+    rm -f "/usr/local/bin/burpsuite-config"
+    rm -f "/usr/share/icons/hicolor/256x256/apps/burpsuite.png"
+    
+    # Remove user-specific files
+    if [ -n "$PRIMARY_USERNAME" ] && [ -d "/home/$PRIMARY_USERNAME" ]; then
+        rm -f "/home/$PRIMARY_USERNAME/.local/share/applications/burpsuite_pro.desktop"
+        rm -f "/home/$PRIMARY_USERNAME/Desktop/burpsuite_pro.desktop"
+        rm -f "/home/$PRIMARY_USERNAME/.local/share/applications/firefox-burp-proxy.desktop"
+        rm -f "/home/$PRIMARY_USERNAME/.local/share/applications/firefox-normal.desktop"
+        rm -f "/home/$PRIMARY_USERNAME/bin/burp-proxy-on.sh"
+        rm -f "/home/$PRIMARY_USERNAME/bin/burp-proxy-off.sh"
+    fi
+    
+    echo -e "${GREEN}[+] Burp Suite Professional uninstalled successfully${NC}"
+}
+
+# Process command line arguments
+UNINSTALL=false
+
+while getopts "u" option; do
+    case $option in
+        u) UNINSTALL=true ;;
+        *) echo "Usage: $0 [-u]"; exit 1 ;;
+    esac
+done
+
+# Check if uninstall flag is set
+if [ "$UNINSTALL" = true ]; then
+    uninstall_burpsuite
+    exit 0
+fi
+
+echo -e "${BLUE}[i] Starting Burp Suite Professional installation...${NC}"
 
 # Create directories if they don't exist
 mkdir -p "$BURP_DIR"
@@ -28,6 +69,9 @@ if [ -f "$BURP_DIR/burpsuite_pro.jar" ]; then
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${BLUE}[i] Keeping existing installation${NC}"
     exit 0
+  else
+    # Uninstall existing installation before continuing
+    uninstall_burpsuite
   fi
 fi
 
@@ -47,39 +91,58 @@ done
 if [ -z "$BURP_INSTALLER" ]; then
   echo -e "${YELLOW}[!] No Burp Suite Professional installer found.${NC}"
   
-  # Ask for the Burp Suite Pro download URL or path
-  echo -e "${YELLOW}[!] Please provide the Burp Suite Professional JAR file${NC}"
-  echo -e "${YELLOW}[!] You can download it from your PortSwigger account${NC}"
+  # Use the provided default download URL
+  BURP_URL="$DEFAULT_DOWNLOAD_URL"
   
-  read -p "Would you like to provide a download URL for Burp Suite Pro? (y/N) " -n 1 -r
-  echo
+  echo -e "${YELLOW}[*] Downloading Burp Suite Professional from PortSwigger...${NC}"
+  echo -e "${BLUE}[i] Download URL: $BURP_URL${NC}"
   
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Enter the download URL: " BURP_URL
+  # Create temporary file for download
+  TEMP_FILE=$(mktemp)
+  
+  # Download the installer
+  wget -q --show-progress "$BURP_URL" -O "$TEMP_FILE" || {
+    echo -e "${RED}[-] Failed to download Burp Suite Professional${NC}"
+    rm -f "$TEMP_FILE"
     
-    if [ -n "$BURP_URL" ]; then
-      echo -e "${YELLOW}[*] Downloading Burp Suite Professional...${NC}"
-      wget -q --show-progress "$BURP_URL" -O "$BURP_JAR" || {
-        echo -e "${RED}[-] Failed to download Burp Suite Professional${NC}"
-        echo -e "${YELLOW}[!] Please download it manually from your PortSwigger account${NC}"
+    # Ask if user wants to provide alternative URL or file
+    read -p "Would you like to provide an alternative download URL? (y/N) " -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      read -p "Enter the download URL: " BURP_URL
+      
+      if [ -n "$BURP_URL" ]; then
+        echo -e "${YELLOW}[*] Downloading Burp Suite Professional...${NC}"
+        wget -q --show-progress "$BURP_URL" -O "$BURP_JAR" || {
+          echo -e "${RED}[-] Failed to download Burp Suite Professional${NC}"
+          echo -e "${YELLOW}[!] Please download it manually from your PortSwigger account${NC}"
+          exit 1
+        }
+        BURP_INSTALLER="$BURP_JAR"
+      else
+        echo -e "${RED}[-] No URL provided${NC}"
         exit 1
-      }
-      BURP_INSTALLER="$BURP_JAR"
+      fi
     else
-      echo -e "${RED}[-] No URL provided${NC}"
-      exit 1
+      # Ask for file path
+      read -p "Please drag & drop or enter the full path to the Burp Suite Pro JAR file: " BURP_PATH
+      
+      if [ -f "$BURP_PATH" ]; then
+        echo -e "${YELLOW}[*] Using provided JAR file: $BURP_PATH${NC}"
+        BURP_INSTALLER="$BURP_PATH"
+      else
+        echo -e "${RED}[-] Invalid file path provided: $BURP_PATH${NC}"
+        exit 1
+      fi
     fi
-  else
-    # Ask for file path
-    read -p "Please drag & drop or enter the full path to the Burp Suite Pro JAR file: " BURP_PATH
-    
-    if [ -f "$BURP_PATH" ]; then
-      echo -e "${YELLOW}[*] Using provided JAR file: $BURP_PATH${NC}"
-      BURP_INSTALLER="$BURP_PATH"
-    else
-      echo -e "${RED}[-] Invalid file path provided: $BURP_PATH${NC}"
-      exit 1
-    fi
+  }
+  
+  # If download was successful, move to the JAR file location
+  if [ -f "$TEMP_FILE" ]; then
+    mv "$TEMP_FILE" "$BURP_JAR"
+    BURP_INSTALLER="$BURP_JAR"
+    echo -e "${GREEN}[+] Download completed successfully${NC}"
   fi
 fi
 
@@ -333,7 +396,8 @@ echo "3) Run Burp Suite with maximum memory (8GB)"
 echo "4) Activate Burp Suite license"
 echo "5) Fix Burp Suite Java compatibility issues"
 echo "6) Create Firefox shortcuts for Burp proxy"
-echo "7) Exit"
+echo "7) Uninstall Burp Suite Professional"
+echo "8) Exit"
 
 read -p "Select an option: " option
 
@@ -446,6 +510,19 @@ FF_NORMAL
     
     echo -e "${GREEN}[+] Firefox proxy shortcuts created for $username${NC}"
     ;;
+  7)
+    echo -e "${YELLOW}[*] Uninstalling Burp Suite Professional...${NC}"
+    read -p "Are you sure you want to uninstall Burp Suite Professional? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      # Run the script with uninstall flag
+      "$0" -u
+      echo -e "${GREEN}[+] Uninstall completed${NC}"
+      exit 0
+    else
+      echo -e "${BLUE}[i] Uninstall cancelled${NC}"
+    fi
+    ;;
   *)
     echo -e "${BLUE}Exiting.${NC}"
     ;;
@@ -458,6 +535,7 @@ echo -e "${GREEN}[+] Burp Suite Professional installation completed${NC}"
 echo -e "${BLUE}[i] Run Burp Suite with command: burpsuite${NC}"
 echo -e "${BLUE}[i] For configuration options, run: burpsuite-config${NC}"
 echo -e "${BLUE}[i] To activate your license, run: $BURP_DIR/activate_burp.sh${NC}"
+echo -e "${BLUE}[i] To uninstall, run: $0 -u${NC}"
 
 # Final steps
 echo -e "${YELLOW}[*] Would you like to run Burp Suite Professional now? (Y/n)${NC}"
