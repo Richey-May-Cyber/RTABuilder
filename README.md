@@ -8,6 +8,7 @@ Automated deployment system for Kali Linux Remote Testing Appliances. Installs, 
 # Clone the repo
 git clone https://github.com/Richey-May-Cyber/RTABuilder.git /opt/rta-deployment
 cd /opt/rta-deployment
+chmod +x deploy-rta.sh
 
 # Preview what will happen (no system changes)
 sudo ./deploy-rta.sh --auto --dry-run
@@ -81,9 +82,10 @@ Kali Linux no longer ships the `policykit-1` package, which TeamViewer requires 
 
 ## Reference Files
 
-The `referencestuff/` directory contains 60+ security cheatsheets covering BloodHound, Kerberos, Active Directory, reverse shells, privilege escalation, web attacks, and more. These are automatically deployed to `/opt/security-tools/references/` during installation.
+64 security cheatsheets are embedded directly in `deploy-rta.sh` — covering BloodHound, Kerberos, Active Directory, reverse shells, privilege escalation, web attacks, and more. During deployment the script writes them to `/opt/security-tools/references/`. No external files or zips needed.
 
 ```bash
+# After deployment, access them at:
 ls /opt/security-tools/references/
 cat /opt/security-tools/references/bloodref
 cat /opt/security-tools/references/kerbref
@@ -93,9 +95,8 @@ cat /opt/security-tools/references/kerbref
 
 ```
 /opt/rta-deployment/              # Deployment files and logs
-├── deploy-rta.sh                 # Main script
+├── deploy-rta.sh                 # Main script (includes embedded reference cheatsheets)
 ├── config/config.yml             # Tool lists and settings
-├── referencestuff/               # Source reference files
 ├── installer/scripts/            # Helper scripts for manual tools
 ├── logs/                         # Deployment and tool-specific logs
 ├── downloads/                    # Downloaded packages
@@ -129,7 +130,8 @@ manual_tools: "nessus,teamviewer,..."
 
 1. Boot fresh Kali Linux
 2. Clone the repo: `git clone https://github.com/Richey-May-Cyber/RTABuilder.git /opt/rta-deployment`
-3. Run: `cd /opt/rta-deployment && sudo ./deploy-rta.sh --auto`
+3. Make it executable: `chmod +x /opt/rta-deployment/deploy-rta.sh`
+4. Run: `cd /opt/rta-deployment && sudo ./deploy-rta.sh --auto`
 4. After completion, validate: `sudo /opt/security-tools/scripts/validate-tools.sh`
 5. Install any remaining manual tools using the helper scripts
 
@@ -161,7 +163,7 @@ shellcheck --severity=info deploy-rta.sh
 - Complete rewrite with `set -euo pipefail` and proper bash best practices
 - New `--dry-run` flag for safe testing
 - BloodHound CE installation (Docker + bloodhound-python + SharpHound)
-- Reference cheatsheet deployment
+- 64 reference cheatsheets embedded directly in the script (no external files)
 - TeamViewer policykit-1 dependency fix built into the main flow
 - Fixed NC vs RESET color variable mismatch
 - Fixed parallel APT install race conditions
