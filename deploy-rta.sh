@@ -88,7 +88,7 @@ DESKTOP_ONLY=false
 REINSTALL_FAILED=false
 
 # Repository configuration
-GITHUB_REPO_URL="https://github.com/yourusername/rta-deployment.git"
+GITHUB_REPO_URL="https://github.com/Richey-May-Cyber/RTABuilder.git"
 
 # Store original arguments for error messages
 ORIGINAL_ARGS="$*"
