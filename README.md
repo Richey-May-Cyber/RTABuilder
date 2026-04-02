@@ -1,149 +1,184 @@
-# 🛡️ Improved RTA Tools Installer
+# RTA Deployment Script v4.0
 
-A robust, efficient, and reliable toolkit installer for Kali Linux Remote Testing Appliances (RTAs). This solution streamlines the setup and redeployment process for security testing environments.
+Automated deployment system for Kali Linux Remote Testing Appliances. Installs, configures, and validates 75+ security tools with comprehensive error handling, parallel processing, and a built-in dry-run mode.
 
-## 🚀 Features
-
-- **Comprehensive Toolkit**: Installs and configures 75+ security testing tools
-- **Efficient Installation**: Parallel processing for faster deployment
-- **Robust Error Handling**: Improved retry mechanisms and conflict resolution
-- **Desktop Integration**: Creates shortcuts, sets up environment, and disables screen lock
-- **Configuration**: YAML-based configuration for easy customization
-- **Deployment Options**: Full installation, core tools only, or desktop-only mode
-- **Helper Scripts**: Automated generators for tools requiring manual installation
-- **Documentation**: Detailed reports and system snapshots
-
-## 📋 Components
-
-The solution consists of two main scripts:
-
-1. **`rta_installer.sh`**: The main installer script that handles tool installation
-2. **`deploy-rta.sh`**: A deployment wrapper that configures the entire system
-
-## 🛠️ Installation
-
-### Quick Start
+## Quick Start
 
 ```bash
-# Download and run the deployment script
-curl -sSL https://raw.githubusercontent.com/yourusername/rta-installer/main/deploy-rta.sh -o deploy-rta.sh
-chmod +x deploy-rta.sh
-sudo ./deploy-rta.sh
-```
+# Clone the repo
+git clone https://github.com/Richey-May-Cyber/RTABuilder.git /opt/rta-deployment
+cd /opt/rta-deployment
 
-### Installation Options
+# Preview what will happen (no system changes)
+sudo ./deploy-rta.sh --auto --dry-run
 
-```bash
-# Full interactive installation
-sudo ./deploy-rta.sh --interactive
-
-# Fully automated installation
+# Fully automated install
 sudo ./deploy-rta.sh --auto
-
-# Direct tool installation only
-sudo ./rta_installer.sh --full       # Install all tools
-sudo ./rta_installer.sh --core-only  # Install core tools only
-sudo ./rta_installer.sh --desktop-only # Set up desktop shortcuts only
 ```
 
-## 📦 Tool Categories
+## What Gets Installed
 
-The installer handles tools from multiple sources:
+**APT packages (70+):** nmap, wireshark, sqlmap, hydra, metasploit-framework, bloodhound, burpsuite, responder, seclists, gobuster, ffuf, hashcat, john, crackmapexec, and more.
 
-| Type       | Source     | Examples                                                       |
-|------------|------------|----------------------------------------------------------------|
-| APT        | Kali repos | `nmap`, `wireshark`, `sqlmap`, `metasploit-framework`, etc.    |
-| PIPX       | PyPI       | `scoutsuite`, `impacket`, `pymeta`, `trufflehog`, etc.         |
-| Git        | GitHub     | `prowler`, `parsuite`, `evilgophish`, `CyberChef`, etc.        |
-| Manual     | Various    | `nessus`, `burpsuite_enterprise`, `teamviewer`, etc.           |
+**Python tools via PIPX (30+):** impacket, scoutsuite, bloodhound-python, certipy, evil-winrm, autorecon, nuclei, trufflehog, and more.
 
-## ⚙️ Configuration
+**Git repositories (25+):** PayloadsAllTheThings, SecLists, PEASS-ng, BloodHound, Empire, CyberChef, EyeWitness, and more.
 
-The main configuration file is located at `/opt/security-tools/config/config.yml`:
+**BloodHound CE:** Docker-based BloodHound Community Edition with a systemd service, the bloodhound-python ingestor, and SharpHound collector.
+
+**Manual tools:** Nessus, BurpSuite Enterprise, TeamViewer, NinjaOne, GoPhish, Evilginx3 (via helper scripts in `installer/scripts/`).
+
+**Reference cheatsheets:** 60+ security reference files deployed to `/opt/security-tools/references/`.
+
+## CLI Flags
+
+```
+--auto              Fully automated, no prompts
+--interactive       Step-by-step with confirmation prompts (default)
+--dry-run           Simulate install — logs what WOULD happen, changes nothing
+--verbose           Show debug-level output
+--force-reinstall   Reinstall everything, even if already present
+--skip-downloads    Skip git clone / external downloads
+--skip-update       Skip apt-get update
+--core-only         Install core APT + PIPX tools only
+--desktop-only      Desktop environment setup only
+--reinstall-failed  Re-run only for tools that failed validation
+--repo URL          Use a custom GitHub repository URL
+--help              Show help and exit
+```
+
+## Installation Modes
+
+| Command | What it does |
+|---|---|
+| `sudo ./deploy-rta.sh --auto` | Full unattended install — installs everything |
+| `sudo ./deploy-rta.sh --interactive` | Step-by-step with prompts for each stage |
+| `sudo ./deploy-rta.sh --auto --core-only` | APT + PIPX tools only (no git repos, no BloodHound) |
+| `sudo ./deploy-rta.sh --auto --desktop-only` | Desktop shortcuts and system config only |
+| `sudo ./deploy-rta.sh --auto --dry-run` | Simulate the entire install without touching the system |
+
+## BloodHound CE
+
+The script installs BloodHound Community Edition using Docker Compose. After install:
+
+```bash
+# Start BloodHound CE
+sudo systemctl start bloodhound-ce
+
+# Access the web UI at http://localhost:8080
+# Default credentials are printed in the Docker logs:
+sudo docker compose -f /opt/security-tools/bloodhound-ce/docker-compose.yml logs bloodhound
+
+# Run the Python ingestor (installed via PIPX)
+bloodhound-python -u 'user' -p 'pass' -d domain.local -c all -ns <DC_IP> --zip
+
+# SharpHound is downloaded to /opt/security-tools/sharphound/
+```
+
+## TeamViewer on Kali Linux
+
+Kali Linux no longer ships the `policykit-1` package, which TeamViewer requires as a dependency. The deploy script automatically handles this by building and installing a dummy `policykit-1` .deb package that depends on the modern `polkitd` and `pkexec` packages. This runs before the TeamViewer helper script executes, so the `dpkg -i` of TeamViewer proceeds without dependency errors. No manual intervention is needed.
+
+## Reference Files
+
+The `referencestuff/` directory contains 60+ security cheatsheets covering BloodHound, Kerberos, Active Directory, reverse shells, privilege escalation, web attacks, and more. These are automatically deployed to `/opt/security-tools/references/` during installation.
+
+```bash
+ls /opt/security-tools/references/
+cat /opt/security-tools/references/bloodref
+cat /opt/security-tools/references/kerbref
+```
+
+## Directory Structure
+
+```
+/opt/rta-deployment/              # Deployment files and logs
+├── deploy-rta.sh                 # Main script
+├── config/config.yml             # Tool lists and settings
+├── referencestuff/               # Source reference files
+├── installer/scripts/            # Helper scripts for manual tools
+├── logs/                         # Deployment and tool-specific logs
+├── downloads/                    # Downloaded packages
+└── temp/                         # Temporary build files
+
+/opt/security-tools/              # Installed tools and data
+├── bin/                          # Executable symlinks
+├── bloodhound-ce/                # BloodHound CE docker-compose + config
+│   └── docker-compose.yml
+├── sharphound/                   # SharpHound collector
+├── references/                   # Security cheatsheets (deployed from referencestuff/)
+├── helpers/                      # Manual tool helper scripts
+├── scripts/                      # Utility scripts (validate-tools.sh, etc.)
+├── desktop/                      # Desktop shortcuts
+├── system-state/                 # System snapshots
+└── venvs/                        # Python virtual environments
+```
+
+## Configuration
+
+Edit `installer/config.yml` to add or remove tools before running the script. The config uses simple YAML with comma-separated lists:
 
 ```yaml
-# Core apt tools - installed with apt-get
-apt_tools: "nmap,wireshark,sqlmap,hydra,bettercap,seclists,proxychains4,..."
-
-# Python tools - installed with pipx
-pipx_tools: "scoutsuite,impacket,pymeta,fierce,pwnedpasswords,trufflehog,..."
-
-# GitHub repositories
-git_tools: "https://github.com/prowler-cloud/prowler.git,..."
-
-# Manual tools - installation helpers will be generated
-manual_tools: "nessus,vmware_remote_console,burpsuite_enterprise,teamviewer,ninjaone"
+apt_tools: "nmap,wireshark,sqlmap,hydra,..."
+pipx_tools: "impacket,scoutsuite,..."
+git_tools: "https://github.com/org/repo.git,..."
+manual_tools: "nessus,teamviewer,..."
 ```
 
-## 📊 Reporting and Logging
+## Redeployment After a Wipe
 
-The installer maintains detailed logs for troubleshooting:
+1. Boot fresh Kali Linux
+2. Clone the repo: `git clone https://github.com/Richey-May-Cyber/RTABuilder.git /opt/rta-deployment`
+3. Run: `cd /opt/rta-deployment && sudo ./deploy-rta.sh --auto`
+4. After completion, validate: `sudo /opt/security-tools/scripts/validate-tools.sh`
+5. Install any remaining manual tools using the helper scripts
 
-- **Installation Report**: `/opt/security-tools/logs/installation_report_*.txt`
-- **Tool-specific Logs**: `/opt/security-tools/logs/<tool_name>_*.log`
-- **System Snapshot**: `/opt/security-tools/system-state/system-snapshot-*.txt`
+## Logs and Reports
 
-## 🧰 Directory Structure
+Each run generates:
 
-```
-/opt/security-tools/
-├── bin/              # Executable symlinks
-├── config/           # Configuration files
-├── desktop/          # Desktop shortcuts
-├── helpers/          # Helper scripts for manual tools
-├── logs/             # Installation logs
-├── scripts/          # Utility scripts
-├── system-state/     # System snapshots
-├── temp/             # Temporary files
-└── venvs/            # Python virtual environments
-```
+- **Deployment log:** `/opt/rta-deployment/logs/deployment_<timestamp>.log` — full trace of every action
+- **Summary report:** `/opt/rta-deployment/logs/deployment_summary_<timestamp>.txt` — pass/fail overview
+- **System snapshot:** `/opt/security-tools/system-state/snapshot-<timestamp>.txt` — disk, memory, network, and running services
 
-## 📝 Manual Installation Helpers
+## Testing
 
-For tools that require manual installation, helper scripts are generated at `/opt/security-tools/helpers/`:
+**Dry-run mode** simulates the full installation flow without making any system changes:
 
 ```bash
-# Example: Install Nessus
-sudo /opt/security-tools/helpers/install_nessus.sh
-
-# Example: Install TeamViewer
-sudo /opt/security-tools/helpers/install_teamviewer.sh
+sudo ./deploy-rta.sh --auto --dry-run --verbose
 ```
 
-## 🔄 Redeployment
+**Static analysis** with ShellCheck:
 
-To redeploy your RTA after a wipe:
+```bash
+shellcheck --severity=info deploy-rta.sh
+# Passes at all severity levels (info, warning, error)
+```
 
-1. Boot up your fresh Kali Linux installation
-2. Download the deployment script:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/yourusername/rta-installer/main/deploy-rta.sh -o deploy-rta.sh
-   chmod +x deploy-rta.sh
-   ```
-3. Run the deployment script:
-   ```bash
-   sudo ./deploy-rta.sh --auto  # For fully automated installation
-   ```
+## What Changed from v3.0
 
-## 🔧 Customization
+- Complete rewrite with `set -euo pipefail` and proper bash best practices
+- New `--dry-run` flag for safe testing
+- BloodHound CE installation (Docker + bloodhound-python + SharpHound)
+- Reference cheatsheet deployment
+- TeamViewer policykit-1 dependency fix built into the main flow
+- Fixed NC vs RESET color variable mismatch
+- Fixed parallel APT install race conditions
+- Fixed FORCE_REINSTALL boolean comparison logic
+- Fixed cleanup function referencing undefined variables
+- Fixed spinner cleanup on error paths
+- More robust YAML config parsing
+- All functions are idempotent (safe to re-run)
 
-You can customize the installer by:
+## System Requirements
 
-1. Modifying `/opt/security-tools/config/config.yml` to add/remove tools
-2. Creating custom deployment configurations in `/opt/security-tools/config/`
-3. Adding custom scripts to `/opt/security-tools/scripts/`
+- Kali Linux (current version)
+- Root access (via sudo)
+- 10GB disk space (recommended)
+- 2GB RAM (minimum)
+- Network connectivity
 
-## 📋 Future Improvements
+## License
 
-- Add support for containerized tools (Docker)
-- Implement tool version control and update mechanism
-- Add configuration profiles for different testing scenarios
-- Integrate with VM snapshotting for faster reversion
-
-## 📜 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT License
